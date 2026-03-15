@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+  <!-- PWA / Theme -->
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PhotoGuide" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+
+  <title>PhotoGuide — Clinical Photography</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React 18 + Babel (no build step required) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* ── Base reset ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body, #root { height: 100%; margin: 0; padding: 0; }
+    body {
+      background: #0f172a;
+      color: white;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* ── Safe-area helpers ─────────────────────── */
+    .pb-safe  { padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
+    .pt-safe  { padding-top:    max(3rem,   env(safe-area-inset-top)); }
+
+    /* ── Capture button ring pulse ─────────────── */
+    @keyframes ring-pulse {
+      0%   { transform: scale(1);   opacity: .8; }
+      100% { transform: scale(1.45); opacity: 0;  }
+    }
+    .capture-btn::after {
+      content: '';
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      border: 3px solid white;
+      animation: ring-pulse 1.8s ease-out infinite;
+      pointer-events: none;
+    }
+
+    /* ── Flash overlay ─────────────────────────── */
+    @keyframes flash-out {
+      0%   { opacity: .9; }
+      100% { opacity: 0;  }
+    }
+    .flash-overlay {
+      animation: flash-out 0.25s ease-out forwards;
+    }
+
+    /* ── Spirit-level bubble transition ─────────── */
+    .level-bubble { transition: left .08s linear, background-color .2s; }
+
+    /* ── Silhouette SVG ─────────────────────────── */
+    .silhouette { pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+    /* ── Scrollbar hide ─────────────────────────── */
+    .no-scroll::-webkit-scrollbar { display: none; }
+    .no-scroll { scrollbar-width: none; }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    /* ================================================================
+       PhotoGuide — Clinical Before & After Photography PWA
+       ================================================================
+       Components (in order):
+         1. Constants & helpers
+         2. IndexedDB layer  (DB)
+         3. FrontalSilhouette  — SVG frontal face guide
+         4. ProfileSilhouette  — SVG side-profile guide + Frankfort plane
+         5. SpiritLevel        — DeviceOrientationEvent bubble level
+         6. GhostOverlay       — 30% opacity pre-photo alignment aid
+         7. CameraOverlay      — Main capture component (the core deliverable)
+         8. GhostSelector      — Pick a pre-photo to ghost
+         9. AddPatientModal
+        10. PatientDetailView  — Per-patient gallery
+        11. PatientListView    — Home screen
+        12. InstallBanner
+        13. App               — Router / state root
+    ================================================================ */
+
+    const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    /* ── 1. Constants ──────────────────────────────────────────────── */
+
+    const CAPTURE_MODES = {
+      front: { id: 'front', label: 'Front',         abbr: 'FR', color: 'blue'   },
+      left:  { id: 'left',  label: 'Left Profile',  abbr: 'LP', color: 'violet' },
+      right: { id: 'right', label: 'Right Profile', abbr: 'RP', color: 'emerald'},
+    };
+
+    const PHOTO_TYPE_COLORS = { pre: 'emerald', post: 'amber' };
+
+    /* ── 2. IndexedDB layer ────────────────────────────────────────── */
+
+    const DB_NAME    = 'PhotoGuide_v2';
+    const DB_VERSION = 1;
+    let _db = null;
+
+    function openDB() {
+      if (_db) return Promise.resolve(_db);
+      return new Promise((res, rej) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          /* patients store */
+          if (!db.objectStoreNames.contains('patients')) {
+            const ps = db.createObjectStore('patients', { keyPath: 'id' });
+            ps.createIndex('name', 'name');
+          }
+          /* photos store */
+          if (!db.objectStoreNames.contains('photos')) {
+            const ph = db.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
+            ph.createIndex('patientId',   'patientId');
+            ph.createIndex('captureMode', 'captureMode');
+            ph.createIndex('photoType',   'photoType');
+            ph.createIndex('timestamp',   'timestamp');
+          }
+        };
+        req.onsuccess = () => { _db = req.result; res(_db); };
+        req.onerror   = () => rej(req.error);
+      });
+    }
+
+    const DB = {
+      async savePatient(p)      { const db = await openDB(); return idbPut(db, 'patients', p); },
+      async getPatients()       { const db = await openDB(); return idbGetAll(db, 'patients'); },
+      async deletePatient(id)   {
+        const db = await openDB();
+        await idbDelete(db, 'patients', id);
+        // cascade-delete photos
+        const photos = await DB.getPhotosByPatient(id);
+        for (const ph of photos) await idbDelete(db, 'photos', ph.id);
+      },
+      async savePhoto(p)        { const db = await openDB(); return idbAdd(db, 'photos', p); },
+      async getPhotosByPatient(pid) {
+        const db = await openDB();
+        return new Promise((res, rej) => {
+          const tx  = db.transaction('photos', 'readonly');
+          const req = tx.objectStore('photos').index('patientId').getAll(IDBKeyRange.only(pid));
+          req.onsuccess = () => res(req.result ?? []);
+          req.onerror   = () => rej(req.error);
+        });
+      },
+      async deletePhoto(id)     { const db = await openDB(); return idbDelete(db, 'photos', id); },
+    };
+
+    function idbPut(db, store, val) {
+      return new Promise((res, rej) => {
+        const req = db.transaction(store, 'readwrite').objectStore(store).put(val);
+        req.onsuccess = () => res(req.result);
+        req.onerror   = () => rej(req.error);
+      });
+    }
+    function idbAdd(db, store, val) {
+      return new Promise((res, rej) => {
+        const req = db.transaction(store, 'readwrite').objectStore(store).add(val);
+        req.onsuccess = () => res(req.result);
+        req.onerror   = () => rej(req.error);
+      });
+    }
+    function idbGetAll(db, store) {
+      return new Promise((res, rej) => {
+        const req = db.transaction(store, 'readonly').objectStore(store).getAll();
+        req.onsuccess = () => res(req.result ?? []);
+        req.onerror   = () => rej(req.error);
+      });
+    }
+    function idbDelete(db, store, key) {
+      return new Promise((res, rej) => {
+        const req = db.transaction(store, 'readwrite').objectStore(store).delete(key);
+        req.onsuccess = () => res();
+        req.onerror   = () => rej(req.error);
+      });
+    }
+
+    /* ── 3. FrontalSilhouette ──────────────────────────────────────── */
+    /*
+     * A clinically-informed SVG guide for front-facing capture.
+     * Includes: head oval, ears, eye-level Frankfort reference line (horizontal),
+     * vertical midline, eye outlines, nose marker, and shoulder guides.
+     * All strokes use translucent cyan so the live video shows through clearly.
+     */
+    function FrontalSilhouette() {
+      return (
+        <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="fg">
+              <feGaussianBlur stdDeviation="0.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          {/* ── Head oval ── */}
+          <ellipse cx="50" cy="43" rx="23" ry="29"
+            fill="none" stroke="rgba(99,210,255,0.55)" strokeWidth="0.7"
+            strokeDasharray="3,2" filter="url(#fg)" />
+
+          {/* ── Ears ── */}
+          <ellipse cx="27" cy="47" rx="3.5" ry="5.5"
+            fill="none" stroke="rgba(99,210,255,0.45)" strokeWidth="0.6" />
+          <ellipse cx="73" cy="47" rx="3.5" ry="5.5"
+            fill="none" stroke="rgba(99,210,255,0.45)" strokeWidth="0.6" />
+
+          {/* ── Frankfort Horizontal (eye-level, yellow) ── */}
+          <line x1="12" y1="42" x2="88" y2="42"
+            stroke="rgba(253,200,50,0.75)" strokeWidth="0.55" strokeDasharray="4,2.5" />
+
+          {/* ── Vertical midline ── */}
+          <line x1="50" y1="10" x2="50" y2="95"
+            stroke="rgba(99,210,255,0.35)" strokeWidth="0.45" strokeDasharray="2,3" />
+
+          {/* ── Eye outlines ── */}
+          <ellipse cx="36" cy="42" rx="5.5" ry="3"
+            fill="none" stroke="rgba(99,210,255,0.5)" strokeWidth="0.55" />
+          <ellipse cx="64" cy="42" rx="5.5" ry="3"
+            fill="none" stroke="rgba(99,210,255,0.5)" strokeWidth="0.55" />
+
+          {/* ── Nose ── */}
+          <path d="M 46 50 L 44 61 Q 50 63 56 61 L 54 50"
+            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.5" />
+
+          {/* ── Shoulder guide ── */}
+          <path d="M 4 104 Q 20 90 34 87 L 34 93 L 66 93 L 66 87 Q 80 90 96 104"
+            fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.65" />
+
+          {/* ── Neck ── */}
+          <line x1="40" y1="72" x2="38" y2="86" stroke="rgba(99,210,255,0.35)" strokeWidth="0.5" />
+          <line x1="60" y1="72" x2="62" y2="86" stroke="rgba(99,210,255,0.35)" strokeWidth="0.5" />
+
+          {/* ── Corner alignment brackets ── */}
+          <path d="M 7 7 L 7 17 M 7 7 L 17 7"   stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+          <path d="M 93 7 L 93 17 M 93 7 L 83 7" stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+          <path d="M 7 126 L 7 116 M 7 126 L 17 126"   stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+          <path d="M 93 126 L 93 116 M 93 126 L 83 126" stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+
+          {/* ── Label ── */}
+          <text x="50" y="124" textAnchor="middle"
+            fill="rgba(99,210,255,0.55)" fontSize="3.8" fontFamily="monospace" letterSpacing="0.5">
+            FRONT VIEW · ALIGN FACE TO GUIDE
+          </text>
+        </svg>
+      );
+    }
+
+    /* ── 4. ProfileSilhouette ──────────────────────────────────────── */
+    /*
+     * Side-profile guide with Frankfort Horizontal Plane (FHP).
+     * The FHP runs from the superior border of the external auditory meatus
+     * (ear canal / tragus) to the inferior border of the orbital rim.
+     * Both landmarks are marked with gold dots.
+     * The 'side' prop drives a horizontal mirror transform for right-profile shots.
+     */
+    function ProfileSilhouette({ side = 'left' }) {
+      const flip = side === 'right' ? 'scale(-1,1) translate(-100,0)' : undefined;
+
+      return (
+        <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="pg">
+              <feGaussianBlur stdDeviation="0.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <g transform={flip}>
+            {/* ── Forehead to chin ── */}
+            <path d="
+              M 56 13
+              C 67 13 75 20 77 28
+              C 79 36 77 40 75 44
+              C 80 47 81 53 79 57
+              C 77 62 72 63 70 62
+              C 69 68 70 73 74 78
+              C 74 82 70 85 65 86
+              C 59 87 53 86 49 89
+              C 45 92 43 97 43 103"
+              fill="none"
+              stroke="rgba(99,210,255,0.6)"
+              strokeWidth="0.8"
+              filter="url(#pg)" />
+
+            {/* ── Back of head ── */}
+            <path d="M 56 13 C 38 13 27 24 25 38 C 23 52 27 63 30 70 C 33 77 38 84 43 103"
+              fill="none"
+              stroke="rgba(99,210,255,0.6)"
+              strokeWidth="0.8" />
+
+            {/* ── Ear pinna ── */}
+            <ellipse cx="35" cy="51" rx="4.5" ry="6.5"
+              fill="none"
+              stroke="rgba(99,210,255,0.7)"
+              strokeWidth="0.75"
+              filter="url(#pg)" />
+
+            {/* ── Ear canal / tragus dot (Frankfort Point 1) ── */}
+            <circle cx="36" cy="51" r="1.4" fill="rgba(253,200,50,1)" />
+
+            {/* ── Orbital rim dot (Frankfort Point 2) ── */}
+            {/* Orbital rim sits ~below the eye, approximately cx=70,cy=47 */}
+            <circle cx="70" cy="47" r="1.4" fill="rgba(253,200,50,1)" />
+
+            {/* ── Frankfort Horizontal Plane ──
+                 Runs through both gold landmark dots.
+                 In profile this is the gold standard alignment line. ── */}
+            <line x1="8" y1="49" x2="92" y2="49"
+              stroke="rgba(253,200,50,0.85)"
+              strokeWidth="0.65"
+              strokeDasharray="4,2" />
+
+            {/* ── FHP label ── */}
+            <text x="10" y="46.5"
+              fill="rgba(253,200,50,0.75)" fontSize="3" fontFamily="monospace">
+              FRANKFORT PLANE
+            </text>
+
+            {/* ── Eye ── */}
+            <path d="M 65 44 Q 68 41 71 44 Q 68 47 65 44"
+              fill="none" stroke="rgba(99,210,255,0.55)" strokeWidth="0.6" />
+
+            {/* ── Nose ── */}
+            <path d="M 75 44 L 80 57 L 74 59"
+              fill="none" stroke="rgba(99,210,255,0.45)" strokeWidth="0.6" />
+
+            {/* ── Neck ── */}
+            <line x1="43" y1="86" x2="41" y2="103"
+              stroke="rgba(99,210,255,0.4)" strokeWidth="0.55" />
+
+            {/* ── Shoulder ── */}
+            <path d="M 24 108 Q 35 95 47 93 L 47 100 L 88 100"
+              fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.65" />
+
+            {/* ── Vertical plumb line ── */}
+            <line x1="50" y1="5" x2="50" y2="128"
+              stroke="rgba(99,210,255,0.25)" strokeWidth="0.4" strokeDasharray="2,4" />
+
+            {/* ── Corner alignment brackets ── */}
+            <path d="M 7 7 L 7 17 M 7 7 L 17 7"   stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+            <path d="M 93 7 L 93 17 M 93 7 L 83 7" stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+            <path d="M 7 126 L 7 116 M 7 126 L 17 126"   stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+            <path d="M 93 126 L 93 116 M 93 126 L 83 126" stroke="rgba(99,210,255,0.65)" strokeWidth="1.1" fill="none" strokeLinecap="round"/>
+          </g>
+
+          {/* ── Label (not flipped) ── */}
+          <text x="50" y="124" textAnchor="middle"
+            fill="rgba(99,210,255,0.55)" fontSize="3.8" fontFamily="monospace" letterSpacing="0.3">
+            {side === 'left' ? 'LEFT' : 'RIGHT'} PROFILE · FRANKFORT HORIZONTAL
+          </text>
+        </svg>
+      );
+    }
+
+    /* ── 5. SpiritLevel ────────────────────────────────────────────── */
+    /*
+     * Reads DeviceOrientationEvent.gamma (left-right tilt, degrees).
+     * Green bubble = within ±1.5°. Yellow = ±1.5–5°. Red = >5°.
+     * The bubble physically slides left/right to mirror device tilt.
+     */
+    function SpiritLevel({ gamma = 0 }) {
+      const abs      = Math.abs(gamma);
+      const isLevel  = abs < 1.5;
+      const isClose  = abs < 5;
+      // Clamp bubble travel to ±36 px inside a 96px-wide track
+      const travel   = Math.max(-36, Math.min(36, gamma * 2.4));
+
+      const bubbleColor = isLevel
+        ? 'bg-green-400 shadow-[0_0_10px_rgba(74,222,128,0.9)]'
+        : isClose
+          ? 'bg-yellow-400 shadow-[0_0_6px_rgba(250,204,21,0.7)]'
+          : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.7)]';
+
+      return (
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1 pointer-events-none">
+          {/* Track */}
+          <div className="relative w-28 h-5 bg-black/50 rounded-full border border-white/25 overflow-hidden flex items-center">
+            {/* Centre tick */}
+            <div className="absolute left-1/2 top-1 bottom-1 w-px bg-white/40 -translate-x-px" />
+            {/* Bubble */}
+            <div
+              className={`level-bubble absolute top-1 bottom-1 w-7 rounded-full ${bubbleColor}`}
+              style={{ left: `calc(50% + ${travel}px - 14px)` }}
+            />
+          </div>
+          {/* Angle readout */}
+          <span className={`text-[10px] font-mono font-bold ${isLevel ? 'text-green-400' : isClose ? 'text-yellow-400' : 'text-red-400'}`}>
+            {isLevel ? '✓ LEVEL' : `${gamma > 0 ? '▶' : '◀'} ${abs.toFixed(1)}°`}
+          </span>
+        </div>
+      );
+    }
+
+    /* ── 6. GhostOverlay ───────────────────────────────────────────── */
+    /*
+     * Renders the pre-treatment reference image as a semi-transparent layer
+     * over the live camera feed. Opacity is adjustable (default 30%).
+     * A subtle amber border confirms ghosting is active.
+     */
+    function GhostOverlay({ imageUrl, opacity, visible }) {
+      if (!imageUrl || !visible) return null;
+      return (
+        <div
+          className="absolute inset-0 z-10 pointer-events-none"
+          style={{ opacity }}
+        >
+          <img src={imageUrl} alt="ghost reference" className="w-full h-full object-cover" />
+          {/* Amber border reminder */}
+          <div className="absolute inset-0 border-2 border-amber-400/60 rounded-sm" />
+          <div className="absolute top-2 right-2 bg-amber-500 text-black text-[10px] font-extrabold px-2 py-0.5 rounded-full tracking-wider">
+            GHOST ON
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 7. CameraOverlay ──────────────────────────────────────────── */
+    /*
+     * The primary capture component.
+     *
+     * Camera setup:
+     *   • Enumerates devices, preferring telephoto / non-ultra-wide rear lenses
+     *     (wide-angle distorts nasal/auricular proportions in clinical photos).
+     *   • Requests 4:3 aspect ratio at up to 4K resolution.
+     *   • Applies manual focus, exposure, and white-balance lock on demand.
+     *
+     * Silhouette guide:
+     *   • FrontalSilhouette for 'front' mode (Frankfort plane as horizontal reference).
+     *   • ProfileSilhouette for 'left' / 'right' modes (Frankfort plane + two gold dots).
+     *
+     * Ghost overlay:
+     *   • When photoType === 'post' and a ghostImageUrl is provided, the pre-image
+     *     is composited at adjustable opacity (0–60%) over the live feed so the
+     *     clinician can match patient positioning exactly.
+     *
+     * Spirit level:
+     *   • Reads DeviceOrientationEvent.gamma to render a real-time bubble level.
+     *
+     * Capture:
+     *   • Draws the full-resolution video frame to an off-screen canvas.
+     *   • Mirrors the canvas for right-profile so the stored image is anatomically
+     *     correct (not a mirror image).
+     *   • Emits { captureMode, photoType, timestamp, width, height, dataUrl, mimeType }
+     *     plus the raw Blob via the onCapture callback.
+     */
+    function CameraOverlay({
+      captureMode   = 'front',
+      photoType     = 'pre',
+      ghostImageUrl = null,
+      onCapture,
+      onClose,
+      patientName   = '',
+    }) {
+      const videoRef    = useRef(null);
+      const canvasRef   = useRef(null);
+      const streamRef   = useRef(null);
+      const trackRef    = useRef(null);
+
+      const [isReady,       setIsReady]       = useState(false);
+      const [orientation,   setOrientation]   = useState({ gamma: 0 });
+      const [isLocked,      setIsLocked]      = useState(false);
+      const [showGhost,     setShowGhost]     = useState(true);
+      const [ghostOpacity,  setGhostOpacity]  = useState(0.30);
+      const [error,         setError]         = useState(null);
+      const [isCapturing,   setIsCapturing]   = useState(false);
+      const [flashActive,   setFlashActive]   = useState(false);
+      const [capabilities,  setCapabilities]  = useState({});
+      const [videoRes,      setVideoRes]      = useState('');
+
+      /* ── Request iOS DeviceOrientation permission ── */
+      const requestOrientationPermission = useCallback(async () => {
+        if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+          try { await DeviceOrientationEvent.requestPermission(); } catch (_) {}
+        }
+      }, []);
+
+      /* ── Camera init ─────────────────────────────────────────────── */
+      const startCamera = useCallback(async () => {
+        setError(null);
+        setIsReady(false);
+        try {
+          /* Step 1: enumerate to find a telephoto / standard rear lens */
+          let deviceId = null;
+          try {
+            const devs   = await navigator.mediaDevices.enumerateDevices();
+            const vDevs  = devs.filter(d => d.kind === 'videoinput');
+            const tele   = vDevs.find(d => /tele|2x|3x|telephoto/i.test(d.label));
+            const back   = vDevs.find(d => /back|rear/i.test(d.label) && !/ultra|wide/i.test(d.label));
+            deviceId = (tele ?? back)?.deviceId ?? null;
+          } catch (_) { /* enumeration denied — use facingMode fallback */ }
+
+          /* Step 2: build constraints — 4:3 portrait, high-res */
+          const videoConstraints = {
+            facingMode: 'environment',
+            width:       { ideal: 3840, min: 1280 },
+            height:      { ideal: 2880, min: 960  },
+            aspectRatio: { ideal: 4/3             },
+            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          };
+
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false,
+          });
+
+          streamRef.current = stream;
+          const track = stream.getVideoTracks()[0];
+          trackRef.current = track;
+
+          const caps = track.getCapabilities?.() ?? {};
+          setCapabilities(caps);
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.onloadedmetadata = () => {
+              videoRef.current.play();
+              const { videoWidth: w, videoHeight: h } = videoRef.current;
+              setVideoRes(`${w}×${h}`);
+              setIsReady(true);
+            };
+          }
+        } catch (err) {
+          setError(`Camera unavailable: ${err.message}`);
+        }
+      }, []);
+
+      /* ── Focus / exposure lock ───────────────────────────────────── */
+      const applyLock = useCallback(async (lock) => {
+        const track = trackRef.current;
+        if (!track) return;
+        const caps    = track.getCapabilities?.() ?? {};
+        const adv     = [];
+        if (lock) {
+          if (caps.focusMode?.includes('manual'))    adv.push({ focusMode:       'manual'     });
+          if (caps.exposureMode?.includes('manual')) adv.push({ exposureMode:    'manual'     });
+          if (caps.whiteBalanceMode?.includes('manual')) adv.push({ whiteBalanceMode: 'manual' });
+        } else {
+          if (caps.focusMode?.includes('continuous'))    adv.push({ focusMode:       'continuous' });
+          if (caps.exposureMode?.includes('continuous')) adv.push({ exposureMode:    'continuous' });
+          if (caps.whiteBalanceMode?.includes('continuous')) adv.push({ whiteBalanceMode: 'continuous' });
+        }
+        try {
+          if (adv.length) await track.applyConstraints({ advanced: adv });
+        } catch (_) { /* API not fully supported on this device */ }
+        setIsLocked(lock);
+      }, []);
+
+      /* ── Photo capture ───────────────────────────────────────────── */
+      const capturePhoto = useCallback(async () => {
+        const video = videoRef.current;
+        if (!video || !isReady || isCapturing) return;
+
+        setIsCapturing(true);
+
+        /* Flash feedback */
+        setFlashActive(true);
+        setTimeout(() => setFlashActive(false), 220);
+
+        try {
+          const canvas = canvasRef.current;
+          canvas.width  = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext('2d');
+
+          /*
+           * Right-profile mirror fix:
+           * The rear camera outputs a left-profile perspective when pointing
+           * to the patient's right. We flip horizontally so the stored image
+           * is anatomically correct (patient's right is on screen's right).
+           */
+          if (captureMode === 'right') {
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+          }
+          ctx.drawImage(video, 0, 0);
+
+          canvas.toBlob((blob) => {
+            if (!blob) { setIsCapturing(false); return; }
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              onCapture?.({
+                captureMode,
+                photoType,
+                timestamp: Date.now(),
+                width:     canvas.width,
+                height:    canvas.height,
+                dataUrl:   ev.target.result,
+                mimeType:  'image/jpeg',
+              }, blob);
+              setIsCapturing(false);
+            };
+            reader.readAsDataURL(blob);
+          }, 'image/jpeg', 0.95);
+        } catch (err) {
+          console.error('Capture error', err);
+          setIsCapturing(false);
+        }
+      }, [isReady, isCapturing, captureMode, photoType, onCapture]);
+
+      /* ── Device orientation ──────────────────────────────────────── */
+      useEffect(() => {
+        const handler = (e) => setOrientation({ gamma: e.gamma ?? 0 });
+        window.addEventListener('deviceorientation', handler);
+        return () => window.removeEventListener('deviceorientation', handler);
+      }, []);
+
+      /* ── Lifecycle ───────────────────────────────────────────────── */
+      useEffect(() => {
+        requestOrientationPermission();
+        startCamera();
+        return () => {
+          streamRef.current?.getTracks().forEach(t => t.stop());
+        };
+      }, []); // eslint-disable-line
+
+      const isProfile  = captureMode !== 'front';
+      const modeCfg    = CAPTURE_MODES[captureMode];
+
+      return (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+
+          {/* ── Flash overlay ── */}
+          {flashActive && (
+            <div className="absolute inset-0 z-50 bg-white flash-overlay pointer-events-none" />
+          )}
+
+          {/* ── Camera viewport ── */}
+          <div className="relative flex-1 overflow-hidden bg-black">
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              autoPlay playsInline muted
+              /* Mirror preview for right-profile so silhouette lines up visually.
+                 The canvas capture re-mirrors back to anatomically correct. */
+              style={{ transform: captureMode === 'right' ? 'scaleX(-1)' : 'none' }}
+            />
+
+            {/* Hidden capture canvas */}
+            <canvas ref={canvasRef} className="hidden" />
+
+            {/* ── Ghost overlay (POST mode) ── */}
+            <GhostOverlay
+              imageUrl={ghostImageUrl}
+              opacity={ghostOpacity}
+              visible={showGhost && photoType === 'post'}
+            />
+
+            {/* ── Silhouette guide ── */}
+            <div className="absolute inset-0 z-20 pointer-events-none">
+              {captureMode === 'front'
+                ? <FrontalSilhouette />
+                : <ProfileSilhouette side={captureMode} />
+              }
+            </div>
+
+            {/* ── Spirit level ── */}
+            <SpiritLevel gamma={orientation.gamma} />
+
+            {/* ── Mode + type badge ── */}
+            <div className="absolute top-16 left-4 z-30 flex items-center gap-2">
+              <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-2">
+                <span className="text-white text-sm font-bold">{modeCfg.label}</span>
+                <span className={`text-xs font-extrabold px-2 py-0.5 rounded-full ${
+                  photoType === 'pre'
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-amber-500  text-black'
+                }`}>
+                  {photoType.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            {/* ── Lock indicator ── */}
+            {isLocked && (
+              <div className="absolute top-16 right-4 z-30">
+                <div className="bg-amber-500/90 rounded-full px-3 py-1.5 flex items-center gap-1.5">
+                  <span className="text-base">🔒</span>
+                  <span className="text-black text-xs font-bold">LOCKED</span>
+                </div>
+              </div>
+            )}
+
+            {/* ── Resolution watermark ── */}
+            {videoRes && (
+              <div className="absolute bottom-2 right-2 z-30 text-white/30 text-[10px] font-mono">
+                {videoRes}
+              </div>
+            )}
+
+            {/* ── Patient name strip ── */}
+            {patientName && (
+              <div className="absolute bottom-24 left-0 right-0 z-30 flex justify-center pointer-events-none">
+                <div className="bg-black/60 backdrop-blur-sm rounded-full px-4 py-1.5">
+                  <span className="text-white/70 text-sm">{patientName}</span>
+                </div>
+              </div>
+            )}
+
+            {/* ── Ghost opacity controls (POST mode only) ── */}
+            {photoType === 'post' && ghostImageUrl && (
+              <div className="absolute bottom-16 left-4 right-4 z-30">
+                <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-white/60 text-xs w-10">Ghost</span>
+                    <input
+                      type="range"
+                      min="0" max="0.6" step="0.05"
+                      value={ghostOpacity}
+                      onChange={e => setGhostOpacity(parseFloat(e.target.value))}
+                      className="flex-1 accent-amber-400 h-1.5"
+                    />
+                    <span className="text-white/60 text-xs w-7 text-right">
+                      {Math.round(ghostOpacity * 100)}%
+                    </span>
+                    <button
+                      onClick={() => setShowGhost(v => !v)}
+                      className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors ${
+                        showGhost ? 'bg-amber-500 text-black' : 'bg-white/15 text-white/50'
+                      }`}
+                    >
+                      {showGhost ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Camera error ── */}
+            {error && (
+              <div className="absolute inset-0 z-40 bg-black/85 flex items-center justify-center p-6">
+                <div className="bg-slate-800 rounded-2xl p-6 text-center max-w-xs">
+                  <div className="text-4xl mb-3">📷</div>
+                  <p className="text-white text-sm mb-5 leading-relaxed">{error}</p>
+                  <button
+                    onClick={startCamera}
+                    className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Bottom controls ── */}
+          <div className="bg-black/95 backdrop-blur-xl pt-5 px-8 pb-safe">
+            <div className="flex items-center justify-between max-w-xs mx-auto">
+
+              {/* Close */}
+              <button
+                onClick={onClose}
+                className="w-14 h-14 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-white text-xl active:scale-90 transition-transform"
+                aria-label="Close camera"
+              >
+                ✕
+              </button>
+
+              {/* Capture (large, glove-friendly) */}
+              <button
+                onClick={capturePhoto}
+                disabled={!isReady || isCapturing}
+                aria-label="Take photo"
+                className={`relative capture-btn w-24 h-24 rounded-full border-[5px] border-white flex items-center justify-center active:scale-90 transition-transform ${
+                  (!isReady || isCapturing) ? 'opacity-40 cursor-not-allowed' : ''
+                }`}
+              >
+                <div className={`w-[4.5rem] h-[4.5rem] rounded-full transition-transform ${
+                  isCapturing ? 'scale-90' : ''
+                } ${photoType === 'pre' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              </button>
+
+              {/* Focus lock */}
+              <button
+                onClick={() => applyLock(!isLocked)}
+                className={`w-14 h-14 rounded-full border flex items-center justify-center text-xl active:scale-90 transition-transform ${
+                  isLocked
+                    ? 'bg-amber-500/25 border-amber-400 text-amber-300'
+                    : 'bg-white/10   border-white/20  text-white'
+                }`}
+                aria-label={isLocked ? 'Unlock camera' : 'Lock focus & exposure'}
+              >
+                {isLocked ? '🔒' : '🔓'}
+              </button>
+            </div>
+
+            {/* Contextual hint */}
+            <p className="text-center text-white/35 text-xs mt-3 pb-1">
+              {isProfile
+                ? 'Align Frankfort plane (gold line) · ear canal → orbital rim'
+                : 'Centre face in guide · keep spirit level green'}
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 8. GhostSelector ──────────────────────────────────────────── */
+    function GhostSelector({ photos, captureMode, onSelect, onSkip }) {
+      const candidates = photos.filter(p =>
+        p.captureMode === captureMode && p.photoType === 'pre'
+      );
+
+      return (
+        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
+          <div className="pt-safe px-5 pb-4 bg-slate-800 border-b border-white/10">
+            <h2 className="text-white text-xl font-bold">Select Ghost Reference</h2>
+            <p className="text-white/45 text-sm mt-1">
+              Pick a PRE photo to overlay on the live feed for alignment.
+            </p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto no-scroll p-4">
+            {candidates.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
+                <span className="text-5xl">👻</span>
+                <p className="text-white/50 text-sm">
+                  No pre-treatment {CAPTURE_MODES[captureMode]?.label} photos found.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {candidates.map(photo => (
+                  <button
+                    key={photo.id}
+                    onClick={() => onSelect(photo)}
+                    className="relative rounded-xl overflow-hidden aspect-[3/4] border-2 border-white/15 active:border-amber-400 transition-colors"
+                  >
+                    <img src={photo.dataUrl} alt="" className="w-full h-full object-cover" />
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-2">
+                      <p className="text-white/70 text-xs">{new Date(photo.timestamp).toLocaleDateString()}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="px-4 pb-safe pt-3 bg-slate-800 border-t border-white/10">
+            <button
+              onClick={onSkip}
+              className="w-full py-4 bg-white/10 rounded-xl text-white font-bold text-base active:scale-98"
+            >
+              Continue Without Ghost
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 9. AddPatientModal ────────────────────────────────────────── */
+    function AddPatientModal({ onAdd, onClose }) {
+      const [name,      setName]      = useState('');
+      const [patientId, setPatientId] = useState('');
+      const [dob,       setDob]       = useState('');
+      const [notes,     setNotes]     = useState('');
+
+      const submit = (e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        onAdd({
+          id:        patientId.trim() || `P${Date.now()}`,
+          name:      name.trim(),
+          dob,
+          notes:     notes.trim(),
+          createdAt: Date.now(),
+        });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70">
+          <div className="bg-slate-800 w-full rounded-t-3xl px-5 pt-6 pb-10">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-white text-xl font-bold">New Patient</h2>
+              <button onClick={onClose} className="text-white/40 text-2xl leading-none">✕</button>
+            </div>
+            <form onSubmit={submit} className="space-y-4">
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Full Name *</span>
+                <input
+                  type="text" required autoFocus value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Patient name"
+                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-base focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Patient / Chart ID</span>
+                <input
+                  type="text" value={patientId}
+                  onChange={e => setPatientId(e.target.value)}
+                  placeholder="Auto-generated if blank"
+                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-base focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Date of Birth</span>
+                <input
+                  type="date" value={dob}
+                  onChange={e => setDob(e.target.value)}
+                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3.5 text-white text-base focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Clinical Notes</span>
+                <textarea
+                  rows={2} value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Procedure notes, diagnosis…"
+                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/25 text-base resize-none focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button" onClick={onClose}
+                  className="flex-1 py-4 bg-white/10 rounded-xl text-white font-bold text-base active:scale-98"
+                >Cancel</button>
+                <button
+                  type="submit"
+                  className="flex-1 py-4 bg-blue-600 rounded-xl text-white font-bold text-base active:scale-98"
+                >Add Patient</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 10. PatientDetailView ─────────────────────────────────────── */
+    function PatientDetailView({ patient, onBack, onStartCamera }) {
+      const [photos,       setPhotos]       = useState([]);
+      const [viewPhoto,    setViewPhoto]    = useState(null);
+      const [filterMode,   setFilterMode]   = useState('all');
+      const [filterType,   setFilterType]   = useState('all');
+
+      const loadPhotos = useCallback(async () => {
+        const list = await DB.getPhotosByPatient(patient.id);
+        setPhotos(list.sort((a, b) => b.timestamp - a.timestamp));
+      }, [patient.id]);
+
+      useEffect(() => { loadPhotos(); }, [loadPhotos]);
+
+      /* Save to device + delete from DB */
+      const downloadPhoto = (photo) => {
+        const a    = document.createElement('a');
+        a.href     = photo.dataUrl;
+        a.download = [
+          patient.name.replace(/\s+/g, '_'),
+          photo.captureMode,
+          photo.photoType,
+          new Date(photo.timestamp).toISOString().split('T')[0],
+        ].join('_') + '.jpg';
+        a.click();
+      };
+
+      const deletePhoto = async (id) => {
+        if (!confirm('Delete this photo? This cannot be undone.')) return;
+        await DB.deletePhoto(id);
+        setViewPhoto(null);
+        loadPhotos();
+      };
+
+      const filtered = photos.filter(p => {
+        if (filterMode !== 'all' && p.captureMode !== filterMode) return false;
+        if (filterType !== 'all' && p.photoType   !== filterType) return false;
+        return true;
+      });
+
+      /* Group by date */
+      const grouped = filtered.reduce((acc, p) => {
+        const d = new Date(p.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' });
+        (acc[d] ??= []).push(p);
+        return acc;
+      }, {});
+
+      /* Per-mode capture status */
+      const modeStatus = useMemo(() => {
+        const s = {};
+        for (const m of Object.keys(CAPTURE_MODES)) {
+          const mp   = photos.filter(p => p.captureMode === m);
+          s[m] = { hasPre: mp.some(p => p.photoType === 'pre'), hasPost: mp.some(p => p.photoType === 'post') };
+        }
+        return s;
+      }, [photos]);
+
+      return (
+        <div className="flex flex-col h-full bg-slate-900">
+
+          {/* Header */}
+          <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
+            <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
+              ← All Patients
+            </button>
+            <div className="flex items-start justify-between">
+              <div>
+                <h1 className="text-white text-2xl font-bold leading-tight">{patient.name}</h1>
+                <p className="text-white/40 text-sm">{patient.id}</p>
+                {patient.dob && (
+                  <p className="text-white/35 text-xs mt-0.5">
+                    DOB: {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+              <span className="text-white/35 text-xs mt-1">{photos.length} photos</span>
+            </div>
+          </div>
+
+          {/* Capture mode buttons */}
+          <div className="bg-slate-800 px-4 py-3 grid grid-cols-3 gap-2 border-b border-white/8">
+            {Object.values(CAPTURE_MODES).map(mode => {
+              const st = modeStatus[mode.id] ?? {};
+              return (
+                <button
+                  key={mode.id}
+                  onClick={() => onStartCamera(mode.id, photos)}
+                  className="bg-white/8 border border-white/12 rounded-2xl p-3 text-center active:scale-95 transition-transform"
+                >
+                  <p className="text-white font-bold text-sm">{mode.label}</p>
+                  <div className="flex justify-center gap-1 mt-1.5">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPre  ? 'bg-emerald-600 text-white' : 'bg-white/8 text-white/30'}`}>PRE</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPost ? 'bg-amber-600  text-white' : 'bg-white/8 text-white/30'}`}>POST</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Filters */}
+          <div className="flex gap-2 px-4 py-2.5 overflow-x-auto no-scroll bg-slate-900 border-b border-white/8">
+            {['all', 'front', 'left', 'right'].map(m => (
+              <button key={m}
+                onClick={() => setFilterMode(m)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
+                  filterMode === m ? 'bg-blue-600 text-white' : 'bg-white/8 text-white/50'
+                }`}
+              >
+                {m === 'all' ? 'All Views' : CAPTURE_MODES[m]?.label}
+              </button>
+            ))}
+            <div className="w-px bg-white/10 flex-shrink-0" />
+            {['all', 'pre', 'post'].map(t => (
+              <button key={t}
+                onClick={() => setFilterType(t)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
+                  filterType === t ? 'bg-purple-600 text-white' : 'bg-white/8 text-white/50'
+                }`}
+              >
+                {t === 'all' ? 'Pre & Post' : t.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Photo grid */}
+          <div className="flex-1 overflow-y-auto no-scroll px-4 py-4">
+            {Object.entries(grouped).length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-center gap-2">
+                <span className="text-4xl">📸</span>
+                <p className="text-white/40 text-sm">
+                  {photos.length === 0 ? 'No photos yet — tap a view above to capture' : 'No photos match the current filter'}
+                </p>
+              </div>
+            ) : (
+              Object.entries(grouped).map(([date, group]) => (
+                <div key={date} className="mb-6">
+                  <h3 className="text-white/40 text-xs font-bold uppercase tracking-widest mb-2.5">{date}</h3>
+                  <div className="grid grid-cols-3 gap-2">
+                    {group.map(photo => (
+                      <button
+                        key={photo.id}
+                        onClick={() => setViewPhoto(photo)}
+                        className="relative aspect-[3/4] rounded-xl overflow-hidden border border-white/10 active:scale-95 transition-transform"
+                      >
+                        <img src={photo.dataUrl} alt="" className="w-full h-full object-cover" />
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 py-1.5">
+                          <div className="flex items-end justify-between">
+                            <span className="text-white text-[10px] font-bold leading-none">
+                              {CAPTURE_MODES[photo.captureMode]?.abbr}
+                            </span>
+                            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full leading-none ${
+                              photo.photoType === 'pre' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-black'
+                            }`}>
+                              {photo.photoType.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* ── Full-screen photo viewer ── */}
+          {viewPhoto && (
+            <div className="fixed inset-0 z-50 bg-black flex flex-col">
+              <div className="pt-safe px-5 pb-3 flex items-center justify-between bg-black/50">
+                <button onClick={() => setViewPhoto(null)} className="text-white/70 text-xl">✕</button>
+                <div className="text-center">
+                  <p className="text-white font-bold text-sm">{CAPTURE_MODES[viewPhoto.captureMode]?.label}</p>
+                  <p className={`text-xs font-bold ${viewPhoto.photoType === 'pre' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {viewPhoto.photoType.toUpperCase()}-TREATMENT
+                  </p>
+                </div>
+                <button onClick={() => downloadPhoto(viewPhoto)} className="text-white/70 text-xl" aria-label="Download">⬇</button>
+              </div>
+
+              <div className="flex-1 flex items-center justify-center p-3">
+                <img
+                  src={viewPhoto.dataUrl}
+                  alt="clinical photo"
+                  className="max-w-full max-h-full object-contain rounded-xl"
+                />
+              </div>
+
+              <div className="px-5 pb-safe pt-3 bg-black/60">
+                <p className="text-white/35 text-center text-xs mb-3">
+                  {new Date(viewPhoto.timestamp).toLocaleString()} · {viewPhoto.width}×{viewPhoto.height}
+                </p>
+                <button
+                  onClick={() => deletePhoto(viewPhoto.id)}
+                  className="w-full py-3.5 rounded-xl border border-red-800 bg-red-950/50 text-red-400 font-bold text-sm active:scale-98"
+                >
+                  Delete Photo
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ── 11. PatientListView ───────────────────────────────────────── */
+    function PatientListView({ patients, onSelect, onAdd }) {
+      const [q, setQ] = useState('');
+
+      const filtered = patients.filter(p =>
+        p.name.toLowerCase().includes(q.toLowerCase()) ||
+        p.id.toLowerCase().includes(q.toLowerCase())
+      );
+
+      return (
+        <div className="flex flex-col h-full bg-slate-900">
+
+          {/* Header */}
+          <div className="bg-slate-800 pt-safe px-5 pb-4 border-b border-white/8">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-white text-2xl font-bold">PhotoGuide</h1>
+                <p className="text-white/35 text-xs">Clinical Photography System</p>
+              </div>
+              <button
+                onClick={onAdd}
+                aria-label="Add patient"
+                className="w-11 h-11 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-light active:scale-90 transition-transform"
+              >
+                +
+              </button>
+            </div>
+            <input
+              type="search"
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Search patients or chart ID…"
+              className="w-full bg-white/8 border border-white/12 rounded-xl px-4 py-3 text-white placeholder-white/25 text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto no-scroll p-4 space-y-2.5">
+            {filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-52 text-center gap-3">
+                <span className="text-5xl">{patients.length === 0 ? '👤' : '🔍'}</span>
+                <p className="text-white/45 text-base">
+                  {patients.length === 0 ? 'No patients yet' : 'No results'}
+                </p>
+                {patients.length === 0 && (
+                  <p className="text-white/30 text-sm">Tap + to add your first patient</p>
+                )}
+              </div>
+            )}
+
+            {filtered.map(patient => (
+              <button
+                key={patient.id}
+                onClick={() => onSelect(patient)}
+                className="w-full bg-slate-800 border border-white/8 rounded-2xl px-4 py-3.5 flex items-center gap-4 text-left active:scale-98 transition-transform"
+              >
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-base flex-shrink-0">
+                  {patient.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-semibold text-base leading-tight truncate">{patient.name}</p>
+                  <p className="text-white/40 text-xs mt-0.5">{patient.id}</p>
+                  {patient.dob && (
+                    <p className="text-white/30 text-xs">DOB {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}</p>
+                  )}
+                </div>
+                <span className="text-white/25 text-xl">›</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div className="px-5 pb-safe pt-2 border-t border-white/8 bg-slate-900">
+            <p className="text-white/20 text-[10px] text-center">
+              Photos stored locally on this device · IndexedDB cache
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 12. InstallBanner ─────────────────────────────────────────── */
+    function InstallBanner({ deferredPrompt, onDismiss }) {
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+      const handleInstall = async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          await deferredPrompt.userChoice;
+        }
+        onDismiss();
+      };
+
+      return (
+        <div className="fixed bottom-24 inset-x-4 z-40 bg-slate-800/95 backdrop-blur-xl border border-blue-600/40 rounded-2xl p-4 shadow-2xl">
+          <button
+            onClick={onDismiss}
+            className="absolute top-3 right-3 text-white/40 text-lg leading-none"
+          >✕</button>
+          <div className="flex items-start gap-3 pr-6">
+            <span className="text-3xl flex-shrink-0">📲</span>
+            <div>
+              <p className="text-white font-bold text-sm">Install PhotoGuide</p>
+              {isIOS ? (
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  Tap <strong className="text-white/70">Share</strong> → <strong className="text-white/70">Add to Home Screen</strong> for offline access and native experience.
+                </p>
+              ) : (
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  Install for offline use, faster loading, and full-screen capture mode.
+                </p>
+              )}
+              {!isIOS && deferredPrompt && (
+                <button
+                  onClick={handleInstall}
+                  className="mt-2.5 px-4 py-1.5 bg-blue-600 rounded-full text-white text-xs font-bold active:scale-95"
+                >
+                  Install Now
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 13. App ───────────────────────────────────────────────────── */
+    function App() {
+      const [view,           setView]           = useState('patients');
+      const [patients,       setPatients]       = useState([]);
+      const [activePatient,  setActivePatient]  = useState(null);
+      const [showAddPatient, setShowAddPatient] = useState(false);
+
+      /* Camera flow state */
+      const [cameraMode,     setCameraMode]     = useState('front');
+      const [photoType,      setPhotoType]      = useState('pre');
+      const [ghostImageUrl,  setGhostImageUrl]  = useState(null);
+      const [patientPhotos,  setPatientPhotos]  = useState([]);
+      const [showTypeModal,  setShowTypeModal]  = useState(false);
+      const [showGhostSel,   setShowGhostSel]   = useState(false);
+
+      /* PWA install */
+      const [installPrompt,  setInstallPrompt]  = useState(null);
+      const [showInstall,    setShowInstall]     = useState(false);
+
+      /* ── Load patients ── */
+      const loadPatients = useCallback(async () => {
+        const list = await DB.getPatients();
+        setPatients(list.sort((a, b) => a.name.localeCompare(b.name)));
+      }, []);
+
+      useEffect(() => { loadPatients(); }, [loadPatients]);
+
+      /* ── Service worker registration ── */
+      useEffect(() => {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('./sw.js').catch(() => {});
+        }
+      }, []);
+
+      /* ── PWA install prompt ── */
+      useEffect(() => {
+        const handler = (e) => {
+          e.preventDefault();
+          setInstallPrompt(e);
+          setTimeout(() => setShowInstall(true), 4000);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+
+        /* iOS: show hint after delay if not in standalone */
+        const iOS       = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const standalone = window.matchMedia('(display-mode: standalone)').matches;
+        if (iOS && !standalone) setTimeout(() => setShowInstall(true), 6000);
+
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+      }, []);
+
+      /* ── Handlers ── */
+      const handleAddPatient = async (data) => {
+        await DB.savePatient(data);
+        await loadPatients();
+        setShowAddPatient(false);
+      };
+
+      /*
+       * Camera launch flow:
+       *   1. User taps a capture-mode button in PatientDetailView.
+       *   2. Modal asks PRE or POST.
+       *   3. If POST → GhostSelector.
+       *   4. Camera opens.
+       */
+      const handleStartCamera = useCallback((mode, photos) => {
+        setCameraMode(mode);
+        setPatientPhotos(photos ?? []);
+        setShowTypeModal(true);
+      }, []);
+
+      const handleTypeChosen = (type) => {
+        setPhotoType(type);
+        setShowTypeModal(false);
+        if (type === 'post') {
+          setShowGhostSel(true);
+        } else {
+          setGhostImageUrl(null);
+          setView('camera');
+        }
+      };
+
+      const handleGhostChosen = (photo) => {
+        setGhostImageUrl(photo.dataUrl);
+        setShowGhostSel(false);
+        setView('camera');
+      };
+
+      const handleGhostSkip = () => {
+        setGhostImageUrl(null);
+        setShowGhostSel(false);
+        setView('camera');
+      };
+
+      /*
+       * After capture:
+       *   • Save to IndexedDB.
+       *   • Offer device download (File System Access API or <a download> fallback).
+       *   • Return to patient detail.
+       */
+      const handleCapture = useCallback(async (photoData, blob) => {
+        /* 1. Store in IndexedDB */
+        await DB.savePhoto({ ...photoData, patientId: activePatient.id });
+
+        /* 2. Save to device gallery / downloads */
+        const filename = [
+          activePatient.name.replace(/\s+/g, '_'),
+          photoData.captureMode,
+          photoData.photoType,
+          new Date(photoData.timestamp).toISOString().split('T')[0],
+        ].join('_') + '.jpg';
+
+        try {
+          if ('showSaveFilePicker' in window) {
+            /* Chrome desktop / Android: direct folder save */
+            const fh = await window.showSaveFilePicker({
+              suggestedName: filename,
+              types: [{ description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg'] } }],
+            }).catch(() => null);           // user cancelled → fall through
+            if (fh) {
+              const writable = await fh.createWritable();
+              await writable.write(blob);
+              await writable.close();
+            } else {
+              triggerDownload(blob, filename);
+            }
+          } else {
+            /* iOS Safari / Firefox: trigger standard download to Photos/Downloads */
+            triggerDownload(blob, filename);
+          }
+        } catch (_) {
+          triggerDownload(blob, filename);
+        }
+
+        /* 3. Return to detail view */
+        setTimeout(() => setView('patient-detail'), 350);
+      }, [activePatient]);
+
+      const triggerDownload = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      /* ── Render ── */
+      return (
+        <div className="h-full flex flex-col overflow-hidden">
+
+          {/* PRE / POST modal */}
+          {showTypeModal && (
+            <div className="fixed inset-0 z-50 flex items-end bg-black/75">
+              <div className="bg-slate-800 w-full rounded-t-3xl px-5 pt-6 pb-10">
+                <h2 className="text-white text-xl font-bold mb-1">{CAPTURE_MODES[cameraMode]?.label}</h2>
+                <p className="text-white/45 text-sm mb-6">Is this photo before or after treatment?</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => handleTypeChosen('pre')}
+                    className="py-6 bg-emerald-600 rounded-2xl text-white font-bold text-lg flex flex-col items-center gap-2 active:scale-95 transition-transform"
+                  >
+                    <span className="text-3xl">📸</span>
+                    <span>PRE</span>
+                    <span className="text-sm font-normal opacity-70">Before treatment</span>
+                  </button>
+                  <button
+                    onClick={() => handleTypeChosen('post')}
+                    className="py-6 bg-amber-600 rounded-2xl text-white font-bold text-lg flex flex-col items-center gap-2 active:scale-95 transition-transform"
+                  >
+                    <span className="text-3xl">✨</span>
+                    <span>POST</span>
+                    <span className="text-sm font-normal opacity-70">After treatment</span>
+                  </button>
+                </div>
+                <button
+                  onClick={() => setShowTypeModal(false)}
+                  className="mt-4 w-full py-3.5 bg-white/8 rounded-xl text-white/60 font-medium active:scale-98"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Ghost selector */}
+          {showGhostSel && (
+            <GhostSelector
+              photos={patientPhotos}
+              captureMode={cameraMode}
+              onSelect={handleGhostChosen}
+              onSkip={handleGhostSkip}
+            />
+          )}
+
+          {/* Camera */}
+          {view === 'camera' && (
+            <CameraOverlay
+              captureMode={cameraMode}
+              photoType={photoType}
+              ghostImageUrl={ghostImageUrl}
+              onCapture={handleCapture}
+              onClose={() => setView('patient-detail')}
+              patientName={activePatient?.name}
+            />
+          )}
+
+          {/* Patient list */}
+          {view === 'patients' && (
+            <PatientListView
+              patients={patients}
+              onSelect={(p) => { setActivePatient(p); setView('patient-detail'); }}
+              onAdd={() => setShowAddPatient(true)}
+            />
+          )}
+
+          {/* Patient detail */}
+          {view === 'patient-detail' && activePatient && (
+            <PatientDetailView
+              patient={activePatient}
+              onBack={() => { setView('patients'); loadPatients(); }}
+              onStartCamera={handleStartCamera}
+            />
+          )}
+
+          {/* Add patient modal */}
+          {showAddPatient && (
+            <AddPatientModal
+              onAdd={handleAddPatient}
+              onClose={() => setShowAddPatient(false)}
+            />
+          )}
+
+          {/* Install banner */}
+          {showInstall && (
+            <InstallBanner
+              deferredPrompt={installPrompt}
+              onDismiss={() => setShowInstall(false)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    /* ── Mount ─────────────────────────────────────────────────────── */
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

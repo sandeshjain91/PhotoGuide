@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+  <!-- Camera body -->
+  <rect x="80" y="160" width="352" height="256" rx="32" fill="#1e3a5f"/>
+  <!-- Lens ring outer -->
+  <circle cx="256" cy="288" r="96" fill="#0f172a" stroke="#3b82f6" stroke-width="8"/>
+  <!-- Lens ring inner -->
+  <circle cx="256" cy="288" r="68" fill="#1e293b" stroke="#60a5fa" stroke-width="4"/>
+  <!-- Lens center -->
+  <circle cx="256" cy="288" r="44" fill="#0ea5e9" opacity="0.85"/>
+  <!-- Lens highlight -->
+  <circle cx="235" cy="267" r="14" fill="white" opacity="0.25"/>
+  <!-- Silhouette guide lines on lens -->
+  <line x1="212" y1="288" x2="300" y2="288" stroke="rgba(255,200,50,0.7)" stroke-width="2.5" stroke-dasharray="6,4"/>
+  <!-- Viewfinder bump -->
+  <rect x="176" y="128" width="80" height="36" rx="14" fill="#1e3a5f"/>
+  <!-- Flash -->
+  <rect x="290" y="136" width="36" height="22" rx="8" fill="#fbbf24" opacity="0.9"/>
+  <!-- Corner guides -->
+  <path d="M 96 176 L 96 196 M 96 176 L 116 176" stroke="#3b82f6" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <path d="M 416 176 L 416 196 M 416 176 L 396 176" stroke="#3b82f6" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <path d="M 96 400 L 96 380 M 96 400 L 116 400" stroke="#3b82f6" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <path d="M 416 400 L 416 380 M 416 400 L 396 400" stroke="#3b82f6" stroke-width="5" stroke-linecap="round" fill="none"/>
+</svg>
