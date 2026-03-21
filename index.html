@@ -750,12 +750,14 @@
      * Scripts are lazy-loaded only when the camera is opened.
      */
     function DistanceMeter({ videoRef, captureMode }) {
-      const [state,    setState]    = useState('loading'); // loading | ready | noface | error
+      // 'detecting' = native FaceDetector running
+      // 'guide'     = FaceDetector unavailable, show static range guide
+      // 'noface'    = detecting but no face found
+      const [mode,     setMode]     = useState('init');
       const [distance, setDistance] = useState(null);
-      const [errMsg,   setErrMsg]   = useState('');
-      const modelRef   = useRef(null);
-      const timerRef   = useRef(null);
-      const runningRef = useRef(true);
+      const detectorRef = useRef(null);
+      const timerRef    = useRef(null);
+      const runningRef  = useRef(true);
 
       const category = CAPTURE_MODES[captureMode]?.category || 'face';
       const range    = DISTANCE_RANGES[category] || DISTANCE_RANGES.face;
@@ -763,25 +765,21 @@
       useEffect(() => {
         runningRef.current = true;
 
-        loadTF()
-          .then(() => window.blazeface.load())
-          .then((model) => {
-            modelRef.current = model;
-            setState('ready');
+        if ('FaceDetector' in window) {
+          try {
+            detectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+            setMode('detecting');
             detect();
-          })
-          .catch((err) => {
-            const msg = err?.message || String(err);
-            console.error('[DistanceMeter] load failed:', msg);
-            setErrMsg(msg.slice(0, 60));
-            setState('error');
-          });
+          } catch (_) {
+            setMode('guide');
+          }
+        } else {
+          setMode('guide');
+        }
 
         return () => {
           runningRef.current = false;
           clearTimeout(timerRef.current);
-          /* Release TF memory */
-          if (modelRef.current?.dispose) modelRef.current.dispose();
         };
       }, []); // eslint-disable-line
 
@@ -789,63 +787,53 @@
         if (!runningRef.current) return;
         const video = videoRef?.current;
 
-        if (!video || video.readyState < 2 || !modelRef.current) {
+        if (!video || video.readyState < 2) {
           timerRef.current = setTimeout(detect, 300);
           return;
         }
 
         try {
-          const preds = await modelRef.current.estimateFaces(video, false);
+          const faces = await detectorRef.current.detect(video);
           if (!runningRef.current) return;
 
-          if (preds.length > 0) {
-            const [x1] = preds[0].topLeft;
-            const [x2] = preds[0].bottomRight;
-            const faceWidthPx = x2 - x1;
-            const fraction    = faceWidthPx / video.videoWidth;
-            const dist        = Math.round(FOCAL_K / fraction);
-            setDistance(dist);
-            setState('ready');
+          if (faces.length > 0) {
+            const faceW    = faces[0].boundingBox.width;
+            const videoW   = video.offsetWidth || video.videoWidth || 1;
+            const fraction = faceW / videoW;
+            setDistance(Math.round(FOCAL_K / fraction));
+            setMode('detecting');
           } else {
             setDistance(null);
-            setState('noface');
+            setMode('noface');
           }
-        } catch (_) { /* silently skip frame */ }
+        } catch (_) { /* skip frame on error */ }
 
         timerRef.current = setTimeout(detect, 350);
       };
 
-      /* ── Rendering ── */
-      if (state === 'error') return (
-        <div className="absolute top-16 right-4 z-30 bg-black/70 rounded-lg px-3 py-1.5 text-xs text-red-400 max-w-[200px]">
-          Dist err: {errMsg || 'unknown'}
+      /* ── Static guide badge (when FaceDetector unavailable) ── */
+      if (mode === 'init') return null;
+
+      if (mode === 'guide') return (
+        <div className="absolute top-16 right-4 z-30">
+          <div className="bg-black/60 backdrop-blur-sm border border-white/20 rounded-2xl px-3 py-2 text-center">
+            <p className="text-[10px] text-white/60 leading-none">Distance guide</p>
+            <p className="text-sm font-bold text-white/80 mt-0.5">{range.label}</p>
+          </div>
         </div>
       );
 
-      if (state === 'loading') {
-        return (
-          <div className="absolute top-16 right-4 z-30">
-            <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1.5">
-              <span className="text-white/50 text-xs">📏 Loading…</span>
-            </div>
+      if (mode === 'noface' || distance === null) return (
+        <div className="absolute top-16 right-4 z-30">
+          <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5">
+            <span className="text-white/40 text-xs font-mono">No face</span>
           </div>
-        );
-      }
+        </div>
+      );
 
-      if (state === 'noface' || distance === null) {
-        return (
-          <div className="absolute top-16 right-4 z-30">
-            <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5">
-              <span className="text-white/40 text-xs font-mono">No face</span>
-            </div>
-          </div>
-        );
-      }
-
-      const inRange   = distance >= range.min && distance <= range.max;
-      const tooClose  = distance < range.min;
-      const indicator = inRange ? '✓' : tooClose ? '↑ closer' : '↓ back';
-      const colorCls  = inRange
+      const inRange  = distance >= range.min && distance <= range.max;
+      const tooClose = distance < range.min;
+      const colorCls = inRange
         ? 'text-emerald-400 bg-emerald-500/20 border-emerald-500/40'
         : tooClose
         ? 'text-red-400 bg-red-500/20 border-red-500/40'
