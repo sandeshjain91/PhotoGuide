@@ -145,8 +145,8 @@
           s.src = src; s.onload = res; s.onerror = rej;
           document.head.appendChild(s);
         });
-        await load('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js');
-        await load('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.min.js');
+        await load('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js');
+        await load('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js');
       })();
       return _tfLoading;
     }
@@ -769,7 +769,7 @@
             setState('ready');
             detect();
           })
-          .catch(() => setState('error'));
+          .catch((err) => { console.error('[DistanceMeter] load failed:', err); setState('error'); });
 
         return () => {
           runningRef.current = false;
@@ -810,7 +810,11 @@
       };
 
       /* ── Rendering ── */
-      if (state === 'error') return null;
+      if (state === 'error') return (
+        <div className="absolute top-16 right-4 z-30 bg-black/60 rounded-lg px-3 py-1.5 text-xs text-red-400">
+          Distance N/A
+        </div>
+      );
 
       if (state === 'loading') {
         return (
