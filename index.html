@@ -752,6 +752,7 @@
     function DistanceMeter({ videoRef, captureMode }) {
       const [state,    setState]    = useState('loading'); // loading | ready | noface | error
       const [distance, setDistance] = useState(null);
+      const [errMsg,   setErrMsg]   = useState('');
       const modelRef   = useRef(null);
       const timerRef   = useRef(null);
       const runningRef = useRef(true);
@@ -769,7 +770,12 @@
             setState('ready');
             detect();
           })
-          .catch((err) => { console.error('[DistanceMeter] load failed:', err); setState('error'); });
+          .catch((err) => {
+            const msg = err?.message || String(err);
+            console.error('[DistanceMeter] load failed:', msg);
+            setErrMsg(msg.slice(0, 60));
+            setState('error');
+          });
 
         return () => {
           runningRef.current = false;
@@ -811,8 +817,8 @@
 
       /* ── Rendering ── */
       if (state === 'error') return (
-        <div className="absolute top-16 right-4 z-30 bg-black/60 rounded-lg px-3 py-1.5 text-xs text-red-400">
-          Distance N/A
+        <div className="absolute top-16 right-4 z-30 bg-black/70 rounded-lg px-3 py-1.5 text-xs text-red-400 max-w-[200px]">
+          Dist err: {errMsg || 'unknown'}
         </div>
       );
 
