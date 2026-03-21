@@ -20,6 +20,10 @@ const CDN_PATTERNS = [
   'unpkg.com/react-dom',
   'unpkg.com/@babel/standalone',
   'accounts.google.com/gsi',
+  'cdn.jsdelivr.net/npm/@tensorflow',
+  'cdn.jsdelivr.net/npm/@tensorflow-models/blazeface',
+  'tfhub.dev',
+  'storage.googleapis.com/tfjs-models',
 ];
 
 // ─── Install ───────────────────────────────────────────────────────────────

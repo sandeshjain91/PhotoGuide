@@ -123,6 +123,34 @@
     const JPEG_QUALITY  = 0.82;
     const MAX_DIMENSION = 2048;
 
+    /*
+     * Distance estimation constants.
+     * FOCAL_K = face_width_cm * typical_frame_fraction for a ~65° HFOV camera.
+     * Formula: distance_cm ≈ FOCAL_K / (face_bbox_width / video_width)
+     */
+    const FOCAL_K = 11;  // calibrated for 65° HFOV, 140mm avg face width
+    const DISTANCE_RANGES = {
+      face:   { min: 70,  max: 130, label: '70–130 cm' },
+      dental: { min: 22,  max: 45,  label: '22–45 cm'  },
+    };
+
+    /* Dynamically inject TF.js + BlazeFace scripts once, on demand */
+    let _tfLoading = null;
+    function loadTF() {
+      if (_tfLoading) return _tfLoading;
+      _tfLoading = (async () => {
+        const load = (src) => new Promise((res, rej) => {
+          if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+          const s = document.createElement('script');
+          s.src = src; s.onload = res; s.onerror = rej;
+          document.head.appendChild(s);
+        });
+        await load('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js');
+        await load('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.0.7/dist/blazeface.min.js');
+      })();
+      return _tfLoading;
+    }
+
     /* ── 2. IndexedDB layer ────────────────────────────────────────── */
 
     const DB_NAME    = 'PhotoGuide_v2';
@@ -714,6 +742,118 @@
       );
     }
 
+    /* ── 4c. DistanceMeter ───────────────────────────────────────── */
+    /*
+     * Uses BlazeFace (TF.js) to detect the face bounding box in the live
+     * video feed, then estimates camera-to-face distance using:
+     *   distance_cm ≈ FOCAL_K / (face_width_px / video_width_px)
+     * Scripts are lazy-loaded only when the camera is opened.
+     */
+    function DistanceMeter({ videoRef, captureMode }) {
+      const [state,    setState]    = useState('loading'); // loading | ready | noface | error
+      const [distance, setDistance] = useState(null);
+      const modelRef   = useRef(null);
+      const timerRef   = useRef(null);
+      const runningRef = useRef(true);
+
+      const category = CAPTURE_MODES[captureMode]?.category || 'face';
+      const range    = DISTANCE_RANGES[category] || DISTANCE_RANGES.face;
+
+      useEffect(() => {
+        runningRef.current = true;
+
+        loadTF()
+          .then(() => window.blazeface.load())
+          .then((model) => {
+            modelRef.current = model;
+            setState('ready');
+            detect();
+          })
+          .catch(() => setState('error'));
+
+        return () => {
+          runningRef.current = false;
+          clearTimeout(timerRef.current);
+          /* Release TF memory */
+          if (modelRef.current?.dispose) modelRef.current.dispose();
+        };
+      }, []); // eslint-disable-line
+
+      const detect = async () => {
+        if (!runningRef.current) return;
+        const video = videoRef?.current;
+
+        if (!video || video.readyState < 2 || !modelRef.current) {
+          timerRef.current = setTimeout(detect, 300);
+          return;
+        }
+
+        try {
+          const preds = await modelRef.current.estimateFaces(video, false);
+          if (!runningRef.current) return;
+
+          if (preds.length > 0) {
+            const [x1] = preds[0].topLeft;
+            const [x2] = preds[0].bottomRight;
+            const faceWidthPx = x2 - x1;
+            const fraction    = faceWidthPx / video.videoWidth;
+            const dist        = Math.round(FOCAL_K / fraction);
+            setDistance(dist);
+            setState('ready');
+          } else {
+            setDistance(null);
+            setState('noface');
+          }
+        } catch (_) { /* silently skip frame */ }
+
+        timerRef.current = setTimeout(detect, 350);
+      };
+
+      /* ── Rendering ── */
+      if (state === 'error') return null;
+
+      if (state === 'loading') {
+        return (
+          <div className="absolute top-16 right-4 z-30">
+            <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5 flex items-center gap-1.5">
+              <span className="text-white/50 text-xs">📏 Loading…</span>
+            </div>
+          </div>
+        );
+      }
+
+      if (state === 'noface' || distance === null) {
+        return (
+          <div className="absolute top-16 right-4 z-30">
+            <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1.5">
+              <span className="text-white/40 text-xs font-mono">No face</span>
+            </div>
+          </div>
+        );
+      }
+
+      const inRange   = distance >= range.min && distance <= range.max;
+      const tooClose  = distance < range.min;
+      const indicator = inRange ? '✓' : tooClose ? '↑ closer' : '↓ back';
+      const colorCls  = inRange
+        ? 'text-emerald-400 bg-emerald-500/20 border-emerald-500/40'
+        : tooClose
+        ? 'text-red-400 bg-red-500/20 border-red-500/40'
+        : 'text-amber-400 bg-amber-500/20 border-amber-500/40';
+
+      return (
+        <div className="absolute top-16 right-4 z-30">
+          <div className={`border backdrop-blur-sm rounded-2xl px-3 py-2 text-center ${colorCls}`}>
+            <p className="text-lg font-bold font-mono leading-none">{distance} cm</p>
+            <p className="text-[10px] font-bold mt-0.5 leading-none opacity-80">
+              {inRange ? '✓ Good distance' : tooClose ? '↑ Move back' : '↓ Move closer'}
+            </p>
+            <p className="text-[9px] opacity-50 mt-0.5">{range.label}</p>
+          </div>
+        </div>
+      );
+    }
+
     /* ── 5. SpiritLevel ────────────────────────────────────────────── */
     /*
      * Reads DeviceOrientationEvent.gamma (left-right tilt, degrees).
@@ -1051,12 +1191,17 @@
 
             {/* ── Lock indicator ── */}
             {isLocked && (
-              <div className="absolute top-16 right-4 z-30">
+              <div className="absolute top-4 right-4 z-30">
                 <div className="bg-amber-500/90 rounded-full px-3 py-1.5 flex items-center gap-1.5">
                   <span className="text-base">🔒</span>
                   <span className="text-black text-xs font-bold">LOCKED</span>
                 </div>
               </div>
+            )}
+
+            {/* ── Distance meter ── */}
+            {isReady && (
+              <DistanceMeter videoRef={videoRef} captureMode={captureMode} />
             )}
 
             {/* ── Resolution watermark ── */}
