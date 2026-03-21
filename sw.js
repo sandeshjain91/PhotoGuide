@@ -19,6 +19,7 @@ const CDN_PATTERNS = [
   'unpkg.com/react',
   'unpkg.com/react-dom',
   'unpkg.com/@babel/standalone',
+  'accounts.google.com/gsi',
 ];
 
 // ─── Install ───────────────────────────────────────────────────────────────
@@ -97,10 +98,13 @@ async function networkFirst(request) {
   }
 }
 
-// ─── Background Sync (future: sync photos when online) ─────────────────────
+// ─── Background Sync (Google Drive upload queue) ────────────────────────────
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-photos') {
-    // Placeholder for future cloud sync support
-    console.log('[SW] Background sync triggered for photo upload queue.');
+    event.waitUntil(
+      self.clients.matchAll().then((clients) => {
+        clients.forEach((client) => client.postMessage({ type: 'SYNC_UPLOADS' }));
+      })
+    );
   }
 });

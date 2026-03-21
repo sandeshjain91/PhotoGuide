@@ -23,6 +23,9 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <!-- Google Identity Services (OAuth2 for Drive backup) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
   <style>
     /* ── Base reset ─────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; }
@@ -103,17 +106,27 @@
     /* ── 1. Constants ──────────────────────────────────────────────── */
 
     const CAPTURE_MODES = {
-      front: { id: 'front', label: 'Front',         abbr: 'FR', color: 'blue'   },
-      left:  { id: 'left',  label: 'Left Profile',  abbr: 'LP', color: 'violet' },
-      right: { id: 'right', label: 'Right Profile', abbr: 'RP', color: 'emerald'},
+      front:        { id: 'front',        label: 'Front',          abbr: 'FR', color: 'blue',    category: 'face' },
+      left:         { id: 'left',         label: 'Left Profile',   abbr: 'LP', color: 'violet',  category: 'face' },
+      right:        { id: 'right',        label: 'Right Profile',  abbr: 'RP', color: 'emerald', category: 'face' },
+      teeth_front:  { id: 'teeth_front',  label: 'Teeth Front',    abbr: 'TF', color: 'rose',    category: 'dental' },
+      upper_arch:   { id: 'upper_arch',   label: 'Upper Arch',     abbr: 'UA', color: 'sky',     category: 'dental' },
+      lower_arch:   { id: 'lower_arch',   label: 'Lower Arch',     abbr: 'LA', color: 'teal',    category: 'dental' },
+      left_buccal:  { id: 'left_buccal',  label: 'Left Buccal',    abbr: 'LB', color: 'pink',    category: 'dental' },
+      right_buccal: { id: 'right_buccal', label: 'Right Buccal',   abbr: 'RB', color: 'orange',  category: 'dental' },
     };
+    const FACE_MODES   = Object.values(CAPTURE_MODES).filter(m => m.category === 'face');
+    const DENTAL_MODES = Object.values(CAPTURE_MODES).filter(m => m.category === 'dental');
 
     const PHOTO_TYPE_COLORS = { pre: 'emerald', post: 'amber' };
+
+    const JPEG_QUALITY  = 0.82;
+    const MAX_DIMENSION = 2048;
 
     /* ── 2. IndexedDB layer ────────────────────────────────────────── */
 
     const DB_NAME    = 'PhotoGuide_v2';
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
     let _db = null;
 
     function openDB() {
@@ -121,19 +134,41 @@
       return new Promise((res, rej) => {
         const req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          /* patients store */
-          if (!db.objectStoreNames.contains('patients')) {
+          const db  = e.target.result;
+          const old = e.oldVersion;
+
+          if (old < 1) {
             const ps = db.createObjectStore('patients', { keyPath: 'id' });
             ps.createIndex('name', 'name');
-          }
-          /* photos store */
-          if (!db.objectStoreNames.contains('photos')) {
             const ph = db.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
             ph.createIndex('patientId',   'patientId');
             ph.createIndex('captureMode', 'captureMode');
             ph.createIndex('photoType',   'photoType');
             ph.createIndex('timestamp',   'timestamp');
+          }
+
+          if (old < 2) {
+            /* procedures store */
+            if (!db.objectStoreNames.contains('procedures')) {
+              const pr = db.createObjectStore('procedures', { keyPath: 'id' });
+              pr.createIndex('patientId', 'patientId');
+              pr.createIndex('date', 'date');
+            }
+            /* procedureId index on photos */
+            const photoStore = e.target.transaction.objectStore('photos');
+            if (!photoStore.indexNames.contains('procedureId')) {
+              photoStore.createIndex('procedureId', 'procedureId');
+            }
+            /* settings store (for Google Drive config) */
+            if (!db.objectStoreNames.contains('settings')) {
+              db.createObjectStore('settings', { keyPath: 'key' });
+            }
+            /* upload queue store (for Google Drive sync) */
+            if (!db.objectStoreNames.contains('uploadQueue')) {
+              const uq = db.createObjectStore('uploadQueue', { keyPath: 'id', autoIncrement: true });
+              uq.createIndex('status',  'status');
+              uq.createIndex('photoId', 'photoId');
+            }
           }
         };
         req.onsuccess = () => { _db = req.result; res(_db); };
@@ -141,27 +176,59 @@
       });
     }
 
+    function idbIndexQuery(db, store, indexName, key) {
+      return new Promise((res, rej) => {
+        const tx  = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).index(indexName).getAll(IDBKeyRange.only(key));
+        req.onsuccess = () => res(req.result ?? []);
+        req.onerror   = () => rej(req.error);
+      });
+    }
+
     const DB = {
+      /* ── Patients ── */
       async savePatient(p)      { const db = await openDB(); return idbPut(db, 'patients', p); },
       async getPatients()       { const db = await openDB(); return idbGetAll(db, 'patients'); },
       async deletePatient(id)   {
         const db = await openDB();
         await idbDelete(db, 'patients', id);
-        // cascade-delete photos
+        const procedures = await DB.getProceduresByPatient(id);
+        for (const proc of procedures) await DB.deleteProcedure(proc.id);
         const photos = await DB.getPhotosByPatient(id);
         for (const ph of photos) await idbDelete(db, 'photos', ph.id);
       },
+
+      /* ── Procedures ── */
+      async saveProcedure(p)    { const db = await openDB(); return idbPut(db, 'procedures', p); },
+      async getProceduresByPatient(pid) { const db = await openDB(); return idbIndexQuery(db, 'procedures', 'patientId', pid); },
+      async deleteProcedure(id) {
+        const db = await openDB();
+        await idbDelete(db, 'procedures', id);
+        const photos = await idbIndexQuery(db, 'photos', 'procedureId', id);
+        for (const ph of photos) await idbDelete(db, 'photos', ph.id);
+      },
+
+      /* ── Photos ── */
       async savePhoto(p)        { const db = await openDB(); return idbAdd(db, 'photos', p); },
-      async getPhotosByPatient(pid) {
+      async getPhotosByPatient(pid) { const db = await openDB(); return idbIndexQuery(db, 'photos', 'patientId', pid); },
+      async getPhotosByProcedure(procId) { const db = await openDB(); return idbIndexQuery(db, 'photos', 'procedureId', procId); },
+      async deletePhoto(id)     { const db = await openDB(); return idbDelete(db, 'photos', id); },
+
+      /* ── Settings ── */
+      async getSetting(key) {
         const db = await openDB();
         return new Promise((res, rej) => {
-          const tx  = db.transaction('photos', 'readonly');
-          const req = tx.objectStore('photos').index('patientId').getAll(IDBKeyRange.only(pid));
-          req.onsuccess = () => res(req.result ?? []);
+          const req = db.transaction('settings', 'readonly').objectStore('settings').get(key);
+          req.onsuccess = () => res(req.result?.value ?? null);
           req.onerror   = () => rej(req.error);
         });
       },
-      async deletePhoto(id)     { const db = await openDB(); return idbDelete(db, 'photos', id); },
+      async setSetting(key, value) { const db = await openDB(); return idbPut(db, 'settings', { key, value }); },
+
+      /* ── Upload Queue ── */
+      async addToUploadQueue(item) { const db = await openDB(); return idbAdd(db, 'uploadQueue', item); },
+      async getUploadQueue(status) { const db = await openDB(); return idbIndexQuery(db, 'uploadQueue', 'status', status); },
+      async updateUploadItem(item) { const db = await openDB(); return idbPut(db, 'uploadQueue', item); },
     };
 
     function idbPut(db, store, val) {
@@ -190,6 +257,120 @@
         const req = db.transaction(store, 'readwrite').objectStore(store).delete(key);
         req.onsuccess = () => res();
         req.onerror   = () => rej(req.error);
+      });
+    }
+
+    /* ── 2b. Google Drive API helpers ────────────────────────────── */
+
+    const DRIVE_API  = 'https://www.googleapis.com/drive/v3/files';
+    const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+
+    const DriveAPI = {
+      async findOrCreateFolder(name, parentId, token) {
+        const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
+        const searchRes = await fetch(`${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name)`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await searchRes.json();
+        if (data.files?.length > 0) return data.files[0].id;
+
+        const createRes = await fetch(DRIVE_API, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
+        });
+        const folder = await createRes.json();
+        return folder.id;
+      },
+
+      async uploadPhoto(blob, filename, folderId, token) {
+        const metadata = JSON.stringify({ name: filename, parents: [folderId] });
+        const form = new FormData();
+        form.append('metadata', new Blob([metadata], { type: 'application/json' }));
+        form.append('file', blob, filename);
+
+        const res = await fetch(`${DRIVE_UPLOAD}?uploadType=multipart&fields=id`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        const result = await res.json();
+        return result.id;
+      },
+
+      async ensureFolderHierarchy(patientName, procedureName, token) {
+        const rootId    = await this.findOrCreateFolder('PhotoGuide', 'root', token);
+        const patientId = await this.findOrCreateFolder(patientName, rootId, token);
+        const procId    = await this.findOrCreateFolder(procedureName, patientId, token);
+        return procId;
+      },
+    };
+
+    /* ── 2c. Upload Queue Processor ──────────────────────────────── */
+
+    let _uploadRunning = false;
+
+    async function processUploadQueue() {
+      if (_uploadRunning) return;
+      _uploadRunning = true;
+      try {
+        const driveEnabled = await DB.getSetting('driveEnabled');
+        const clientId     = await DB.getSetting('googleClientId');
+        if (!driveEnabled || !clientId) { _uploadRunning = false; return; }
+
+        const pending = await DB.getUploadQueue('pending');
+        if (pending.length === 0) { _uploadRunning = false; return; }
+
+        /* Get access token (silent re-auth if session active) */
+        const token = await new Promise((resolve, reject) => {
+          if (!window.google?.accounts?.oauth2) { reject(new Error('GIS not loaded')); return; }
+          const client = google.accounts.oauth2.initTokenModel({
+            client_id: clientId,
+            scope: 'https://www.googleapis.com/auth/drive.file',
+            callback: (resp) => {
+              if (resp.error) reject(new Error(resp.error));
+              else resolve(resp.access_token);
+            },
+          });
+          client.requestAccessToken({ prompt: '' });
+        });
+
+        for (const item of pending) {
+          try {
+            item.status = 'uploading';
+            await DB.updateUploadItem(item);
+
+            const folderId = await DriveAPI.ensureFolderHierarchy(
+              item.patientName, item.procedureName || 'General', token
+            );
+
+            /* Convert dataUrl to blob for upload */
+            const resp = await fetch(item.dataUrl);
+            const blob = await resp.blob();
+
+            await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
+            item.status = 'done';
+            await DB.updateUploadItem(item);
+          } catch (err) {
+            console.error('Drive upload error:', err);
+            item.retries = (item.retries || 0) + 1;
+            item.status = item.retries >= 3 ? 'error' : 'pending';
+            await DB.updateUploadItem(item);
+          }
+        }
+      } catch (err) {
+        console.error('Upload queue error:', err);
+      }
+      _uploadRunning = false;
+    }
+
+    /* Retry on reconnect */
+    window.addEventListener('online', () => processUploadQueue());
+
+    /* Listen for service worker sync messages */
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        if (e.data?.type === 'SYNC_UPLOADS') processUploadQueue();
       });
     }
 
@@ -364,6 +545,170 @@
           <text x="50" y="124" textAnchor="middle"
             fill="rgba(99,210,255,0.55)" fontSize="3.8" fontFamily="monospace" letterSpacing="0.3">
             {side === 'left' ? 'LEFT' : 'RIGHT'} PROFILE · FRANKFORT HORIZONTAL
+          </text>
+        </svg>
+      );
+    }
+
+    /* ── 4b. Dental Silhouette Guides ────────────────────────────── */
+
+    function TeethFrontalSilhouette() {
+      return (
+        <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+          {/* Lip outline (open smile shape) */}
+          <ellipse cx="50" cy="58" rx="32" ry="18"
+            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.6" strokeDasharray="2,1.5" />
+          {/* Upper lip contour */}
+          <path d="M22,55 Q36,48 50,50 Q64,48 78,55" fill="none" stroke="rgba(99,210,255,0.3)" strokeWidth="0.5" />
+          {/* Lower lip contour */}
+          <path d="M22,61 Q36,72 50,74 Q64,72 78,61" fill="none" stroke="rgba(99,210,255,0.3)" strokeWidth="0.5" />
+
+          {/* Upper teeth arch */}
+          {[-18,-13,-8.5,-4.5,0,4.5,8.5,13,18].map((x, i) => (
+            <rect key={`u${i}`} x={47.5 + x} y="51" width="4" height="6" rx="1"
+              fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+          ))}
+          {/* Lower teeth arch */}
+          {[-16,-11.5,-7.5,-3.8,0,3.8,7.5,11.5,16].map((x, i) => (
+            <rect key={`l${i}`} x={47.8 + x} y="59" width="3.8" height="5.5" rx="1"
+              fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+          ))}
+
+          {/* Vertical midline */}
+          <line x1="50" y1="40" x2="50" y2="80" stroke="rgba(99,210,255,0.2)" strokeWidth="0.3" strokeDasharray="1.5,1" />
+
+          {/* Corner brackets */}
+          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+
+          {/* Label */}
+          <text x="50" y="124" textAnchor="middle"
+            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
+            TEETH FRONT · ALIGN SMILE TO GUIDE
+          </text>
+        </svg>
+      );
+    }
+
+    function UpperArchSilhouette() {
+      return (
+        <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+          {/* Palatal horseshoe outline */}
+          <path d="M28,85 Q28,30 50,25 Q72,30 72,85"
+            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.7" strokeDasharray="2,1.5" />
+          {/* Inner arch */}
+          <path d="M35,80 Q35,42 50,38 Q65,42 65,80"
+            fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+
+          {/* Tooth positions along the arch */}
+          {[
+            [30,78],[29,72],[28,65],[28.5,58],[30,52],[33,46],[37,41],[42,37],[50,35],
+            [58,37],[63,41],[67,46],[70,52],[71.5,58],[72,65],[71,72],[70,78]
+          ].map(([cx,cy], i) => (
+            <circle key={i} cx={cx} cy={cy} r="2.2"
+              fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.4" />
+          ))}
+
+          {/* Midline */}
+          <line x1="50" y1="20" x2="50" y2="90" stroke="rgba(99,210,255,0.2)" strokeWidth="0.3" strokeDasharray="1.5,1" />
+
+          {/* Corner brackets */}
+          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+
+          <text x="50" y="124" textAnchor="middle"
+            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
+            UPPER ARCH · OCCLUSAL VIEW
+          </text>
+        </svg>
+      );
+    }
+
+    function LowerArchSilhouette() {
+      return (
+        <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+          {/* Mandibular horseshoe (inverted, narrower) */}
+          <path d="M30,40 Q30,90 50,95 Q70,90 70,40"
+            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.7" strokeDasharray="2,1.5" />
+          {/* Inner arch */}
+          <path d="M37,43 Q37,82 50,86 Q63,82 63,43"
+            fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+
+          {/* Tooth positions */}
+          {[
+            [32,45],[31,51],[31,57],[31.5,63],[33,69],[36,75],[40,80],[45,84],[50,86],
+            [55,84],[60,80],[64,75],[67,69],[68.5,63],[69,57],[69,51],[68,45]
+          ].map(([cx,cy], i) => (
+            <circle key={i} cx={cx} cy={cy} r="2.2"
+              fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.4" />
+          ))}
+
+          {/* Midline */}
+          <line x1="50" y1="35" x2="50" y2="100" stroke="rgba(99,210,255,0.2)" strokeWidth="0.3" strokeDasharray="1.5,1" />
+
+          {/* Corner brackets */}
+          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+
+          <text x="50" y="124" textAnchor="middle"
+            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
+            LOWER ARCH · OCCLUSAL VIEW
+          </text>
+        </svg>
+      );
+    }
+
+    function BuccalSilhouette({ side = 'left' }) {
+      const isRight = side === 'right';
+      return (
+        <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+          <g transform={isRight ? 'translate(100,0) scale(-1,1)' : ''}>
+            {/* Cheek retractor outline */}
+            <path d="M15,40 Q12,55 15,70 Q20,75 25,70 L25,42 Q20,37 15,40 Z"
+              fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+            <path d="M80,40 Q83,55 80,70 Q75,75 70,70 L70,42 Q75,37 80,40 Z"
+              fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+
+            {/* Upper teeth row (lateral view) */}
+            <path d="M28,50 L72,50" stroke="rgba(99,210,255,0.3)" strokeWidth="0.4" />
+            {[30,36,42,48,54,60,66].map((x, i) => (
+              <rect key={`u${i}`} x={x} y="44" width="5" height="6" rx="1"
+                fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+            ))}
+
+            {/* Lower teeth row */}
+            <path d="M28,62 L72,62" stroke="rgba(99,210,255,0.3)" strokeWidth="0.4" />
+            {[30,36,42,48,54,60,66].map((x, i) => (
+              <rect key={`l${i}`} x={x} y="62" width="5" height="5.5" rx="1"
+                fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+            ))}
+
+            {/* Occlusion line */}
+            <line x1="25" y1="56" x2="75" y2="56"
+              stroke="rgba(255,215,0,0.4)" strokeWidth="0.5" strokeDasharray="2,1" />
+
+            {/* Molar emphasis (posterior) */}
+            <rect x="62" y="43" width="10" height="7" rx="1.5"
+              fill="none" stroke="rgba(99,210,255,0.5)" strokeWidth="0.5" />
+            <rect x="62" y="61" width="10" height="7" rx="1.5"
+              fill="none" stroke="rgba(99,210,255,0.5)" strokeWidth="0.5" />
+          </g>
+
+          {/* Corner brackets */}
+          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+
+          <text x="50" y="124" textAnchor="middle"
+            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
+            {isRight ? 'RIGHT' : 'LEFT'} BUCCAL · ALIGN TEETH TO GUIDE
           </text>
         </svg>
       );
@@ -575,8 +920,17 @@
 
         try {
           const canvas = canvasRef.current;
-          canvas.width  = video.videoWidth;
-          canvas.height = video.videoHeight;
+          let w = video.videoWidth;
+          let h = video.videoHeight;
+
+          /* Down-scale if either dimension exceeds MAX_DIMENSION */
+          if (Math.max(w, h) > MAX_DIMENSION) {
+            const scale = MAX_DIMENSION / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+          }
+          canvas.width  = w;
+          canvas.height = h;
           const ctx = canvas.getContext('2d');
 
           /*
@@ -585,11 +939,11 @@
            * to the patient's right. We flip horizontally so the stored image
            * is anatomically correct (patient's right is on screen's right).
            */
-          if (captureMode === 'right') {
+          if (captureMode === 'right' || captureMode === 'right_buccal') {
             ctx.translate(canvas.width, 0);
             ctx.scale(-1, 1);
           }
-          ctx.drawImage(video, 0, 0);
+          ctx.drawImage(video, 0, 0, w, h);
 
           canvas.toBlob((blob) => {
             if (!blob) { setIsCapturing(false); return; }
@@ -599,15 +953,15 @@
                 captureMode,
                 photoType,
                 timestamp: Date.now(),
-                width:     canvas.width,
-                height:    canvas.height,
+                width:     w,
+                height:    h,
                 dataUrl:   ev.target.result,
                 mimeType:  'image/jpeg',
               }, blob);
               setIsCapturing(false);
             };
             reader.readAsDataURL(blob);
-          }, 'image/jpeg', 0.95);
+          }, 'image/jpeg', JPEG_QUALITY);
         } catch (err) {
           console.error('Capture error', err);
           setIsCapturing(false);
@@ -630,8 +984,19 @@
         };
       }, []); // eslint-disable-line
 
-      const isProfile  = captureMode !== 'front';
       const modeCfg    = CAPTURE_MODES[captureMode];
+
+      const SILHOUETTE_MAP = {
+        front:        () => <FrontalSilhouette />,
+        left:         () => <ProfileSilhouette side="left" />,
+        right:        () => <ProfileSilhouette side="right" />,
+        teeth_front:  () => <TeethFrontalSilhouette />,
+        upper_arch:   () => <UpperArchSilhouette />,
+        lower_arch:   () => <LowerArchSilhouette />,
+        left_buccal:  () => <BuccalSilhouette side="left" />,
+        right_buccal: () => <BuccalSilhouette side="right" />,
+      };
+      const renderSilhouette = SILHOUETTE_MAP[captureMode] || (() => null);
 
       return (
         <div className="fixed inset-0 z-50 bg-black flex flex-col">
@@ -649,7 +1014,7 @@
               autoPlay playsInline muted
               /* Mirror preview for right-profile so silhouette lines up visually.
                  The canvas capture re-mirrors back to anatomically correct. */
-              style={{ transform: captureMode === 'right' ? 'scaleX(-1)' : 'none' }}
+              style={{ transform: (captureMode === 'right' || captureMode === 'right_buccal') ? 'scaleX(-1)' : 'none' }}
             />
 
             {/* Hidden capture canvas */}
@@ -664,10 +1029,7 @@
 
             {/* ── Silhouette guide ── */}
             <div className="absolute inset-0 z-20 pointer-events-none">
-              {captureMode === 'front'
-                ? <FrontalSilhouette />
-                : <ProfileSilhouette side={captureMode} />
-              }
+              {renderSilhouette()}
             </div>
 
             {/* ── Spirit level ── */}
@@ -802,8 +1164,14 @@
 
             {/* Contextual hint */}
             <p className="text-center text-white/35 text-xs mt-3 pb-1">
-              {isProfile
+              {captureMode === 'left' || captureMode === 'right'
                 ? 'Align Frankfort plane (gold line) · ear canal → orbital rim'
+                : captureMode === 'left_buccal' || captureMode === 'right_buccal'
+                ? 'Use cheek retractors · align teeth to guide'
+                : captureMode === 'upper_arch' || captureMode === 'lower_arch'
+                ? 'Position mirror parallel to arch · keep level'
+                : captureMode === 'teeth_front'
+                ? 'Use lip retractors · align smile midline'
                 : 'Centre face in guide · keep spirit level green'}
             </p>
           </div>
@@ -897,7 +1265,7 @@
                   type="text" required autoFocus value={name}
                   onChange={e => setName(e.target.value)}
                   placeholder="Patient name"
-                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-base focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/40 text-base focus:outline-none focus:border-blue-500"
                 />
               </label>
               <label className="block">
@@ -906,7 +1274,7 @@
                   type="text" value={patientId}
                   onChange={e => setPatientId(e.target.value)}
                   placeholder="Auto-generated if blank"
-                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-base focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/40 text-base focus:outline-none focus:border-blue-500"
                 />
               </label>
               <label className="block">
@@ -914,7 +1282,7 @@
                 <input
                   type="date" value={dob}
                   onChange={e => setDob(e.target.value)}
-                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3.5 text-white text-base focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white text-base focus:outline-none focus:border-blue-500"
                 />
               </label>
               <label className="block">
@@ -923,7 +1291,7 @@
                   rows={2} value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Procedure notes, diagnosis…"
-                  className="w-full bg-white/8 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/25 text-base resize-none focus:outline-none focus:border-blue-500"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-base resize-none focus:outline-none focus:border-blue-500"
                 />
               </label>
               <div className="flex gap-3 pt-1">
@@ -942,26 +1310,214 @@
       );
     }
 
-    /* ── 10. PatientDetailView ─────────────────────────────────────── */
-    function PatientDetailView({ patient, onBack, onStartCamera }) {
+    /* ── 10a. AddProcedureModal ──────────────────────────────────── */
+    function AddProcedureModal({ patientId, onAdd, onClose }) {
+      const [name,     setName]     = useState('');
+      const [date,     setDate]     = useState(new Date().toISOString().split('T')[0]);
+      const [notes,    setNotes]    = useState('');
+      const [category, setCategory] = useState('dental');
+
+      const submit = (e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        onAdd({
+          id:        'PROC_' + Date.now(),
+          patientId,
+          name:      name.trim(),
+          date,
+          notes:     notes.trim(),
+          category,
+          createdAt: Date.now(),
+        });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70">
+          <div className="bg-slate-800 w-full rounded-t-3xl px-5 pt-6 pb-10">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-white text-xl font-bold">New Procedure</h2>
+              <button onClick={onClose} className="text-white/40 text-2xl leading-none">✕</button>
+            </div>
+            <form onSubmit={submit} className="space-y-4">
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Procedure Name *</span>
+                <input
+                  type="text" required autoFocus value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="e.g. Crown Fitting, Teeth Whitening"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/40 text-base focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Date</span>
+                <input
+                  type="date" value={date}
+                  onChange={e => setDate(e.target.value)}
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white text-base focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <div>
+                <span className="text-white/50 text-sm block mb-1">Category</span>
+                <div className="flex gap-2">
+                  {['dental', 'face', 'both'].map(c => (
+                    <button key={c} type="button" onClick={() => setCategory(c)}
+                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-colors ${
+                        category === c ? 'bg-blue-600 text-white' : 'bg-white/8 text-white/50'
+                      }`}
+                    >{c === 'both' ? 'Both' : c.charAt(0).toUpperCase() + c.slice(1)}</button>
+                  ))}
+                </div>
+              </div>
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Notes</span>
+                <textarea
+                  rows={2} value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  placeholder="Additional notes…"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-base resize-none focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={onClose}
+                  className="flex-1 py-4 bg-white/10 rounded-xl text-white font-bold text-base active:scale-98"
+                >Cancel</button>
+                <button type="submit"
+                  className="flex-1 py-4 bg-blue-600 rounded-xl text-white font-bold text-base active:scale-98"
+                >Add Procedure</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 10b. PatientDetailView (now shows procedures list) ──────── */
+    function PatientDetailView({ patient, onBack, onOpenProcedure, onAddProcedure }) {
+      const [procedures, setProcedures] = useState([]);
+      const [photoCounts, setPhotoCounts] = useState({});
+      const [showAddProc, setShowAddProc] = useState(false);
+
+      const load = useCallback(async () => {
+        const procs = await DB.getProceduresByPatient(patient.id);
+        setProcedures(procs.sort((a, b) => b.createdAt - a.createdAt));
+        const counts = {};
+        for (const proc of procs) {
+          const photos = await DB.getPhotosByProcedure(proc.id);
+          counts[proc.id] = photos.length;
+        }
+        setPhotoCounts(counts);
+      }, [patient.id]);
+
+      useEffect(() => { load(); }, [load]);
+
+      const handleAddProcedure = async (proc) => {
+        await DB.saveProcedure(proc);
+        setShowAddProc(false);
+        load();
+      };
+
+      const deleteProcedure = async (id) => {
+        if (!confirm('Delete this procedure and all its photos? This cannot be undone.')) return;
+        await DB.deleteProcedure(id);
+        load();
+      };
+
+      return (
+        <div className="flex flex-col h-full bg-slate-900">
+          {/* Header */}
+          <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
+            <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
+              ← All Patients
+            </button>
+            <div className="flex items-start justify-between">
+              <div>
+                <h1 className="text-white text-2xl font-bold leading-tight">{patient.name}</h1>
+                <p className="text-white/40 text-sm">{patient.id}</p>
+                {patient.dob && (
+                  <p className="text-white/35 text-xs mt-0.5">
+                    DOB: {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+              <span className="text-white/35 text-xs mt-1">{procedures.length} procedures</span>
+            </div>
+          </div>
+
+          {/* Procedures list */}
+          <div className="flex-1 overflow-y-auto no-scroll px-4 py-4 space-y-3">
+            {procedures.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-center gap-2">
+                <span className="text-4xl">📋</span>
+                <p className="text-white/40 text-sm">No procedures yet — add one to start capturing photos</p>
+              </div>
+            ) : (
+              procedures.map(proc => (
+                <button
+                  key={proc.id}
+                  onClick={() => onOpenProcedure(proc)}
+                  className="w-full bg-white/6 border border-white/10 rounded-2xl p-4 text-left active:scale-[0.98] transition-transform"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-white font-bold text-base">{proc.name}</p>
+                      <p className="text-white/40 text-sm mt-0.5">
+                        {new Date(proc.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                      </p>
+                      {proc.notes && <p className="text-white/30 text-xs mt-1">{proc.notes}</p>}
+                    </div>
+                    <div className="text-right flex-shrink-0 ml-3">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                        proc.category === 'dental' ? 'bg-rose-600/20 text-rose-400' :
+                        proc.category === 'face' ? 'bg-blue-600/20 text-blue-400' :
+                        'bg-purple-600/20 text-purple-400'
+                      }`}>{proc.category === 'both' ? 'Face+Dental' : proc.category.charAt(0).toUpperCase() + proc.category.slice(1)}</span>
+                      <p className="text-white/30 text-xs mt-1">{photoCounts[proc.id] ?? 0} photos</p>
+                    </div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+
+          {/* Add Procedure FAB */}
+          <div className="px-4 pb-safe pt-3 bg-slate-900 border-t border-white/8">
+            <button
+              onClick={() => setShowAddProc(true)}
+              className="w-full py-4 bg-blue-600 rounded-2xl text-white font-bold text-base active:scale-98"
+            >+ Add Procedure</button>
+          </div>
+
+          {showAddProc && (
+            <AddProcedureModal
+              patientId={patient.id}
+              onAdd={handleAddProcedure}
+              onClose={() => setShowAddProc(false)}
+            />
+          )}
+        </div>
+      );
+    }
+
+    /* ── 10c. ProcedureDetailView (photos within a procedure) ──── */
+    function ProcedureDetailView({ patient, procedure, onBack, onStartCamera }) {
       const [photos,       setPhotos]       = useState([]);
       const [viewPhoto,    setViewPhoto]    = useState(null);
       const [filterMode,   setFilterMode]   = useState('all');
       const [filterType,   setFilterType]   = useState('all');
 
       const loadPhotos = useCallback(async () => {
-        const list = await DB.getPhotosByPatient(patient.id);
+        const list = await DB.getPhotosByProcedure(procedure.id);
         setPhotos(list.sort((a, b) => b.timestamp - a.timestamp));
-      }, [patient.id]);
+      }, [procedure.id]);
 
       useEffect(() => { loadPhotos(); }, [loadPhotos]);
 
-      /* Save to device + delete from DB */
       const downloadPhoto = (photo) => {
         const a    = document.createElement('a');
         a.href     = photo.dataUrl;
         a.download = [
           patient.name.replace(/\s+/g, '_'),
+          procedure.name.replace(/\s+/g, '_'),
           photo.captureMode,
           photo.photoType,
           new Date(photo.timestamp).toISOString().split('T')[0],
@@ -982,22 +1538,30 @@
         return true;
       });
 
-      /* Group by date */
       const grouped = filtered.reduce((acc, p) => {
         const d = new Date(p.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' });
         (acc[d] ??= []).push(p);
         return acc;
       }, {});
 
-      /* Per-mode capture status */
+      /* Determine which capture modes to show based on procedure category */
+      const availableModes = procedure.category === 'face' ? FACE_MODES
+        : procedure.category === 'dental' ? DENTAL_MODES
+        : Object.values(CAPTURE_MODES);
+
       const modeStatus = useMemo(() => {
         const s = {};
-        for (const m of Object.keys(CAPTURE_MODES)) {
-          const mp   = photos.filter(p => p.captureMode === m);
-          s[m] = { hasPre: mp.some(p => p.photoType === 'pre'), hasPost: mp.some(p => p.photoType === 'post') };
+        for (const m of availableModes) {
+          const mp = photos.filter(p => p.captureMode === m.id);
+          s[m.id] = { hasPre: mp.some(p => p.photoType === 'pre'), hasPost: mp.some(p => p.photoType === 'post') };
         }
         return s;
-      }, [photos]);
+      }, [photos, availableModes]);
+
+      /* Group modes by category for display */
+      const modeGroups = procedure.category === 'both'
+        ? [{ label: 'Face', modes: FACE_MODES }, { label: 'Dental', modes: DENTAL_MODES }]
+        : [{ label: procedure.category === 'face' ? 'Face' : 'Dental', modes: availableModes }];
 
       return (
         <div className="flex flex-col h-full bg-slate-900">
@@ -1005,45 +1569,51 @@
           {/* Header */}
           <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
             <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
-              ← All Patients
+              ← {patient.name}
             </button>
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-white text-2xl font-bold leading-tight">{patient.name}</h1>
-                <p className="text-white/40 text-sm">{patient.id}</p>
-                {patient.dob && (
-                  <p className="text-white/35 text-xs mt-0.5">
-                    DOB: {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
-                  </p>
-                )}
+                <h1 className="text-white text-2xl font-bold leading-tight">{procedure.name}</h1>
+                <p className="text-white/40 text-sm">
+                  {new Date(procedure.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                </p>
               </div>
               <span className="text-white/35 text-xs mt-1">{photos.length} photos</span>
             </div>
           </div>
 
           {/* Capture mode buttons */}
-          <div className="bg-slate-800 px-4 py-3 grid grid-cols-3 gap-2 border-b border-white/8">
-            {Object.values(CAPTURE_MODES).map(mode => {
-              const st = modeStatus[mode.id] ?? {};
-              return (
-                <button
-                  key={mode.id}
-                  onClick={() => onStartCamera(mode.id, photos)}
-                  className="bg-white/8 border border-white/12 rounded-2xl p-3 text-center active:scale-95 transition-transform"
-                >
-                  <p className="text-white font-bold text-sm">{mode.label}</p>
-                  <div className="flex justify-center gap-1 mt-1.5">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPre  ? 'bg-emerald-600 text-white' : 'bg-white/8 text-white/30'}`}>PRE</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPost ? 'bg-amber-600  text-white' : 'bg-white/8 text-white/30'}`}>POST</span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="bg-slate-800 px-4 py-3 border-b border-white/8 space-y-3">
+            {modeGroups.map(group => (
+              <div key={group.label}>
+                {modeGroups.length > 1 && (
+                  <p className="text-white/40 text-xs font-bold uppercase tracking-wider mb-1.5">{group.label}</p>
+                )}
+                <div className="grid grid-cols-3 gap-2">
+                  {group.modes.map(mode => {
+                    const st = modeStatus[mode.id] ?? {};
+                    return (
+                      <button
+                        key={mode.id}
+                        onClick={() => onStartCamera(mode.id, photos, procedure)}
+                        className="bg-white/8 border border-white/12 rounded-2xl p-3 text-center active:scale-95 transition-transform"
+                      >
+                        <p className="text-white font-bold text-sm">{mode.label}</p>
+                        <div className="flex justify-center gap-1 mt-1.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPre  ? 'bg-emerald-600 text-white' : 'bg-white/8 text-white/30'}`}>PRE</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPost ? 'bg-amber-600  text-white' : 'bg-white/8 text-white/30'}`}>POST</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* Filters */}
           <div className="flex gap-2 px-4 py-2.5 overflow-x-auto no-scroll bg-slate-900 border-b border-white/8">
-            {['all', 'front', 'left', 'right'].map(m => (
+            {['all', ...availableModes.map(m => m.id)].map(m => (
               <button key={m}
                 onClick={() => setFilterMode(m)}
                 className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
@@ -1107,7 +1677,7 @@
             )}
           </div>
 
-          {/* ── Full-screen photo viewer ── */}
+          {/* Full-screen photo viewer */}
           {viewPhoto && (
             <div className="fixed inset-0 z-50 bg-black flex flex-col">
               <div className="pt-safe px-5 pb-3 flex items-center justify-between bg-black/50">
@@ -1147,7 +1717,7 @@
     }
 
     /* ── 11. PatientListView ───────────────────────────────────────── */
-    function PatientListView({ patients, onSelect, onAdd }) {
+    function PatientListView({ patients, onSelect, onAdd, onSettings }) {
       const [q, setQ] = useState('');
 
       const filtered = patients.filter(p =>
@@ -1165,20 +1735,29 @@
                 <h1 className="text-white text-2xl font-bold">PhotoGuide</h1>
                 <p className="text-white/35 text-xs">Clinical Photography System</p>
               </div>
-              <button
-                onClick={onAdd}
-                aria-label="Add patient"
-                className="w-11 h-11 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-light active:scale-90 transition-transform"
-              >
-                +
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onSettings}
+                  aria-label="Settings"
+                  className="w-11 h-11 bg-white/8 rounded-full flex items-center justify-center text-white/60 text-lg active:scale-90 transition-transform"
+                >
+                  ⚙
+                </button>
+                <button
+                  onClick={onAdd}
+                  aria-label="Add patient"
+                  className="w-11 h-11 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-light active:scale-90 transition-transform"
+                >
+                  +
+                </button>
+              </div>
             </div>
             <input
               type="search"
               value={q}
               onChange={e => setQ(e.target.value)}
               placeholder="Search patients or chart ID…"
-              className="w-full bg-white/8 border border-white/12 rounded-xl px-4 py-3 text-white placeholder-white/25 text-sm focus:outline-none focus:border-blue-500"
+              className="w-full bg-slate-700 border border-white/12 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
 
@@ -1272,12 +1851,181 @@
       );
     }
 
-    /* ── 13. App ───────────────────────────────────────────────────── */
+    /* ── 13. SettingsView ─────────────────────────────────────────── */
+    function SettingsView({ onBack }) {
+      const [clientId,     setClientId]     = useState('');
+      const [driveEnabled, setDriveEnabled] = useState(false);
+      const [driveEmail,   setDriveEmail]   = useState('');
+      const [pendingCount, setPendingCount] = useState(0);
+      const [errorCount,   setErrorCount]   = useState(0);
+      const [storageUsed,  setStorageUsed]  = useState(null);
+      const [signingIn,    setSigningIn]    = useState(false);
+
+      useEffect(() => {
+        (async () => {
+          const cid = await DB.getSetting('googleClientId');
+          const en  = await DB.getSetting('driveEnabled');
+          const em  = await DB.getSetting('driveEmail');
+          if (cid) setClientId(cid);
+          if (en)  setDriveEnabled(true);
+          if (em)  setDriveEmail(em);
+
+          const pq = await DB.getUploadQueue('pending');
+          const eq = await DB.getUploadQueue('error');
+          setPendingCount(pq.length);
+          setErrorCount(eq.length);
+
+          if (navigator.storage?.estimate) {
+            const est = await navigator.storage.estimate();
+            setStorageUsed(est);
+          }
+        })();
+      }, []);
+
+      const saveClientId = async () => {
+        await DB.setSetting('googleClientId', clientId.trim());
+      };
+
+      const handleSignIn = async () => {
+        if (!clientId.trim()) { alert('Please enter a Google Client ID first.'); return; }
+        await saveClientId();
+        setSigningIn(true);
+        try {
+          const token = await new Promise((resolve, reject) => {
+            if (!window.google?.accounts?.oauth2) {
+              reject(new Error('Google Identity Services not loaded. Check your internet connection.'));
+              return;
+            }
+            const client = google.accounts.oauth2.initTokenModel({
+              client_id: clientId.trim(),
+              scope: 'https://www.googleapis.com/auth/drive.file',
+              callback: (resp) => {
+                if (resp.error) reject(new Error(resp.error_description || resp.error));
+                else resolve(resp.access_token);
+              },
+            });
+            client.requestAccessToken();
+          });
+
+          /* Get user email */
+          const info = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const user = await info.json();
+
+          await DB.setSetting('driveEnabled', true);
+          await DB.setSetting('driveEmail', user.email || 'Connected');
+          setDriveEnabled(true);
+          setDriveEmail(user.email || 'Connected');
+        } catch (err) {
+          alert('Sign-in failed: ' + err.message);
+        }
+        setSigningIn(false);
+      };
+
+      const handleSignOut = async () => {
+        await DB.setSetting('driveEnabled', false);
+        await DB.setSetting('driveEmail', '');
+        setDriveEnabled(false);
+        setDriveEmail('');
+      };
+
+      const handleUploadNow = () => {
+        processUploadQueue();
+        alert('Upload started. Check back in a moment.');
+      };
+
+      const formatBytes = (bytes) => {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      };
+
+      return (
+        <div className="flex flex-col h-full bg-slate-900">
+          <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
+            <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
+              ← Back
+            </button>
+            <h1 className="text-white text-2xl font-bold">Settings</h1>
+          </div>
+
+          <div className="flex-1 overflow-y-auto no-scroll px-4 py-5 space-y-6">
+
+            {/* Google Drive Backup */}
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4">
+              <h2 className="text-white font-bold text-base">Google Drive Backup</h2>
+
+              <label className="block">
+                <span className="text-white/50 text-sm block mb-1">Google OAuth Client ID</span>
+                <input
+                  type="text" value={clientId}
+                  onChange={e => setClientId(e.target.value)}
+                  onBlur={saveClientId}
+                  placeholder="xxxx.apps.googleusercontent.com"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500 font-mono"
+                />
+                <span className="text-white/30 text-xs mt-1 block">Create at console.cloud.google.com → APIs → Credentials</span>
+              </label>
+
+              {driveEnabled ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-emerald-400 text-sm font-bold">Connected</p>
+                      <p className="text-white/40 text-xs">{driveEmail}</p>
+                    </div>
+                    <button onClick={handleSignOut}
+                      className="px-4 py-2 bg-white/8 rounded-xl text-white/60 text-sm font-medium active:scale-95"
+                    >Sign Out</button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <p className="text-white/40 text-xs">
+                      {pendingCount} pending · {errorCount} errors
+                    </p>
+                    {pendingCount > 0 && (
+                      <button onClick={handleUploadNow}
+                        className="px-3 py-1.5 bg-blue-600 rounded-lg text-white text-xs font-bold active:scale-95"
+                      >Upload Now</button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <button onClick={handleSignIn} disabled={signingIn}
+                  className="w-full py-3.5 bg-blue-600 rounded-xl text-white font-bold text-sm active:scale-98 disabled:opacity-50"
+                >{signingIn ? 'Signing in…' : 'Sign In with Google'}</button>
+              )}
+            </div>
+
+            {/* Storage */}
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
+              <h2 className="text-white font-bold text-base">Storage</h2>
+              {storageUsed ? (
+                <div>
+                  <p className="text-white/50 text-sm">
+                    Using {formatBytes(storageUsed.usage)} of {formatBytes(storageUsed.quota)}
+                  </p>
+                  <div className="w-full h-2 bg-white/10 rounded-full mt-2 overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, (storageUsed.usage / storageUsed.quota) * 100)}%` }} />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-white/40 text-sm">Storage estimate not available</p>
+              )}
+              <p className="text-white/30 text-xs">Photos stored locally on this device via IndexedDB</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 14. App ───────────────────────────────────────────────────── */
     function App() {
-      const [view,           setView]           = useState('patients');
-      const [patients,       setPatients]       = useState([]);
-      const [activePatient,  setActivePatient]  = useState(null);
-      const [showAddPatient, setShowAddPatient] = useState(false);
+      const [view,              setView]              = useState('patients');
+      const [patients,          setPatients]          = useState([]);
+      const [activePatient,     setActivePatient]     = useState(null);
+      const [activeProcedure,   setActiveProcedure]   = useState(null);
+      const [showAddPatient,    setShowAddPatient]    = useState(false);
 
       /* Camera flow state */
       const [cameraMode,     setCameraMode]     = useState('front');
@@ -1337,9 +2085,10 @@
        *   3. If POST → GhostSelector.
        *   4. Camera opens.
        */
-      const handleStartCamera = useCallback((mode, photos) => {
+      const handleStartCamera = useCallback((mode, photos, procedure) => {
         setCameraMode(mode);
         setPatientPhotos(photos ?? []);
+        if (procedure) setActiveProcedure(procedure);
         setShowTypeModal(true);
       }, []);
 
@@ -1374,15 +2123,17 @@
        */
       const handleCapture = useCallback(async (photoData, blob) => {
         /* 1. Store in IndexedDB */
-        await DB.savePhoto({ ...photoData, patientId: activePatient.id });
+        await DB.savePhoto({
+          ...photoData,
+          patientId:   activePatient.id,
+          procedureId: activeProcedure?.id ?? null,
+        });
 
         /* 2. Save to device gallery / downloads */
-        const filename = [
-          activePatient.name.replace(/\s+/g, '_'),
-          photoData.captureMode,
-          photoData.photoType,
-          new Date(photoData.timestamp).toISOString().split('T')[0],
-        ].join('_') + '.jpg';
+        const nameParts = [activePatient.name.replace(/\s+/g, '_')];
+        if (activeProcedure) nameParts.push(activeProcedure.name.replace(/\s+/g, '_'));
+        nameParts.push(photoData.captureMode, photoData.photoType, new Date(photoData.timestamp).toISOString().split('T')[0]);
+        const filename = nameParts.join('_') + '.jpg';
 
         try {
           if ('showSaveFilePicker' in window) {
@@ -1406,9 +2157,32 @@
           triggerDownload(blob, filename);
         }
 
-        /* 3. Return to detail view */
-        setTimeout(() => setView('patient-detail'), 350);
-      }, [activePatient]);
+        /* 3. Queue Google Drive upload if enabled */
+        try {
+          const driveEnabled = await DB.getSetting('driveEnabled');
+          if (driveEnabled) {
+            await DB.addToUploadQueue({
+              photoId:       null,
+              patientName:   activePatient.name,
+              procedureName: activeProcedure?.name || 'General',
+              filename,
+              dataUrl:       photoData.dataUrl,
+              status:        'pending',
+              retries:       0,
+              createdAt:     Date.now(),
+            });
+            /* Try uploading immediately (non-blocking) */
+            processUploadQueue();
+            /* Register background sync for offline scenarios */
+            if (navigator.serviceWorker?.ready) {
+              navigator.serviceWorker.ready.then(reg => reg.sync?.register('sync-photos')).catch(() => {});
+            }
+          }
+        } catch (_) { /* Drive queue failure should not block capture flow */ }
+
+        /* 4. Return to detail view */
+        setTimeout(() => setView(activeProcedure ? 'procedure-detail' : 'patient-detail'), 350);
+      }, [activePatient, activeProcedure]);
 
       const triggerDownload = (blob, filename) => {
         const url = URL.createObjectURL(blob);
@@ -1475,9 +2249,14 @@
               photoType={photoType}
               ghostImageUrl={ghostImageUrl}
               onCapture={handleCapture}
-              onClose={() => setView('patient-detail')}
+              onClose={() => setView(activeProcedure ? 'procedure-detail' : 'patient-detail')}
               patientName={activePatient?.name}
             />
+          )}
+
+          {/* Settings */}
+          {view === 'settings' && (
+            <SettingsView onBack={() => setView('patients')} />
           )}
 
           {/* Patient list */}
@@ -1486,14 +2265,25 @@
               patients={patients}
               onSelect={(p) => { setActivePatient(p); setView('patient-detail'); }}
               onAdd={() => setShowAddPatient(true)}
+              onSettings={() => setView('settings')}
             />
           )}
 
-          {/* Patient detail */}
+          {/* Patient detail (procedures list) */}
           {view === 'patient-detail' && activePatient && (
             <PatientDetailView
               patient={activePatient}
               onBack={() => { setView('patients'); loadPatients(); }}
+              onOpenProcedure={(proc) => { setActiveProcedure(proc); setView('procedure-detail'); }}
+            />
+          )}
+
+          {/* Procedure detail (photos) */}
+          {view === 'procedure-detail' && activePatient && activeProcedure && (
+            <ProcedureDetailView
+              patient={activePatient}
+              procedure={activeProcedure}
+              onBack={() => { setActiveProcedure(null); setView('patient-detail'); }}
               onStartCamera={handleStartCamera}
             />
           )}
