@@ -2360,16 +2360,33 @@
       };
 
       /* ── Firebase handlers ── */
+      const parseFirebaseConfig = (raw) => {
+        /* Firebase Console gives JS object (unquoted keys), not JSON.
+         * Handle: const firebaseConfig = { apiKey: "..." };
+         * Also handle pure JSON { "apiKey": "..." }                    */
+        let s = raw.trim();
+        /* Strip variable declaration wrapper */
+        s = s.replace(/^(?:const|let|var)\s+\w+\s*=\s*/, '');
+        /* Strip trailing semicolon */
+        s = s.replace(/;\s*$/, '');
+        /* Try native JSON first */
+        try { return JSON.parse(s); } catch (_) {}
+        /* Convert JS object to JSON: quote unquoted keys */
+        const jsonified = s.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+        return JSON.parse(jsonified);
+      };
+
       const handleSaveFirebaseConfig = async () => {
         const trimmed = fbConfigStr.trim();
-        if (!trimmed) { alert('Please paste your Firebase config JSON.'); return; }
+        if (!trimmed) { alert('Please paste your Firebase config.'); return; }
         try {
-          const cfg = JSON.parse(trimmed);
+          const cfg = parseFirebaseConfig(trimmed);
           const required = ['apiKey', 'authDomain', 'projectId', 'storageBucket'];
           const missing  = required.filter(k => !cfg[k]);
           if (missing.length) { alert('Missing required fields: ' + missing.join(', ')); return; }
           setFbSaving(true);
-          await DB.setSetting('firebaseConfig', trimmed);
+          const configJson = JSON.stringify(cfg);
+          await DB.setSetting('firebaseConfig', configJson);
           /* Reset singleton so getFirebase() re-initializes */
           _firebaseApp = null; _firestore = null; _fbStorage = null;
           const fb = await getFirebase();
@@ -2377,7 +2394,8 @@
           setFbEnabled(true);
           alert('Firebase connected successfully!');
         } catch (err) {
-          if (err.message.includes('JSON')) alert('Invalid JSON. Please copy the full config object from Firebase Console.');
+          if (err.message.includes('JSON') || err.message.includes('parse'))
+            alert('Could not parse config. Paste the full object from Firebase Console → Project Settings → Your apps → Config.');
           else alert('Firebase error: ' + err.message);
         }
         setFbSaving(false);
