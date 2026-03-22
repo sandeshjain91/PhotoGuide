@@ -1079,6 +1079,23 @@
           <rect x="0" y="0" width="100" height="0.6"
             fill={`${c}0.35)`} className="guide-scanline" />
 
+          {/* ── Clinical silhouette (from reference photo) ── */}
+          {/* Head — egg shape, wider at temples, narrowing to jaw/chin */}
+          <path d="M50,14 C63,13 76,20 81,34 C86,50 83,68 77,81 C72,91 61,101 50,107 C39,101 28,91 23,81 C17,68 14,50 19,34 C24,20 37,13 50,14Z"
+            fill={`${c}0.07)`} stroke={`${c}0.28)`} strokeWidth="0.8" />
+          {/* Right ear */}
+          <path d="M81,57 C85,53 89,55 90,62 C91,68 87,72 83,71 L81,68Z"
+            fill={`${c}0.05)`} stroke={`${c}0.25)`} strokeWidth="0.7" />
+          {/* Left ear */}
+          <path d="M19,57 C15,53 11,55 10,62 C9,68 13,72 17,71 L19,68Z"
+            fill={`${c}0.05)`} stroke={`${c}0.25)`} strokeWidth="0.7" />
+          {/* Neck */}
+          <path d="M44,107 L41,128 L59,128 L56,107Z"
+            fill={`${c}0.05)`} stroke={`${c}0.2)`} strokeWidth="0.65" />
+          {/* Shoulders */}
+          <path d="M2,133 C16,129 30,128 41,128 M59,128 C70,128 84,129 98,133"
+            fill="none" stroke={`${c}0.28)`} strokeWidth="0.8" />
+
           {/* ── Vertical midline — solid, full height ── */}
           <line x1="50" y1="4" x2="50" y2="129"
             stroke={`${c}0.65)`} strokeWidth="0.85" />
@@ -1155,6 +1172,25 @@
           {/* ── Animated scan line ── */}
           <rect x="0" y="0" width="100" height="0.6"
             fill={`${c}0.35)`} className="guide-scanline" />
+
+          {/* ── Clinical silhouette (left profile — patient faces right) ── */}
+          <g transform={isRight ? 'translate(100,0) scale(-1,1)' : undefined}>
+            {/* Head outline: crown → forehead → nose → lips → chin → neck → back of head */}
+            <path d="M50,8 C60,7 72,13 77,25 C82,37 80,52 76,63 C72,72 65,79 60,84 C57,88 54,94 54,100 L46,100 C46,94 43,88 40,84 C35,79 28,72 24,63 C20,52 18,37 23,25 C28,13 40,7 50,8Z"
+              fill={`${c}0.07)`} stroke={`${c}0.28)`} strokeWidth="0.8" />
+            {/* Ear (right side in left-profile = tragus side) */}
+            <path d="M76,55 C81,51 86,53 87,60 C88,67 84,71 79,70 L76,67Z"
+              fill={`${c}0.05)`} stroke={`${c}0.25)`} strokeWidth="0.7" />
+            {/* Nose bump on face outline (left side in left-profile = nose side) */}
+            <path d="M24,46 C19,47 16,52 17,57 C18,62 23,63 24,61"
+              fill={`${c}0.04)`} stroke={`${c}0.22)`} strokeWidth="0.65" />
+            {/* Neck */}
+            <path d="M46,100 L43,122 L57,122 L54,100Z"
+              fill={`${c}0.05)`} stroke={`${c}0.2)`} strokeWidth="0.65" />
+            {/* Shoulders */}
+            <path d="M2,133 C14,128 28,124 43,122 M57,122 C72,124 86,128 98,133"
+              fill="none" stroke={`${c}0.28)`} strokeWidth="0.8" />
+          </g>
 
           {/* ── Frankfort Horizontal Plane — solid, full width ── */}
           <line x1="4" y1={FP_Y} x2="96" y2={FP_Y}
