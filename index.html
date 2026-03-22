@@ -1110,6 +1110,82 @@
      *   5. Notifies parent via onReadyChange(allReady, coachingText)
      * For dental modes, only Level is checked (FaceDetector doesn't help).
      */
+    /*
+     * TrueVertical — gravity-aligned plumb line.
+     * Uses DeviceOrientationEvent.gamma (left-right tilt) to rotate a line
+     * by -gamma degrees so it always points toward the ground.
+     * Green when within ±1.5°, amber within ±5°, white otherwise.
+     * Transition: smooth 80ms so it tracks movement without jitter.
+     */
+    function TrueVertical({ gamma }) {
+      const abs    = Math.abs(gamma);
+      const isTrue = abs < 1.5;
+      const isNear = abs < 5;
+      const color  = isTrue
+        ? 'rgba(52,211,153,0.85)'
+        : isNear
+        ? 'rgba(251,191,36,0.75)'
+        : 'rgba(255,255,255,0.55)';
+      const glow = isTrue
+        ? '0 0 8px rgba(52,211,153,0.8)'
+        : isNear
+        ? '0 0 6px rgba(251,191,36,0.6)'
+        : 'none';
+
+      return (
+        <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
+          {/* Plumb line — rotates opposite to device tilt */}
+          <div style={{
+            position:        'absolute',
+            width:           '1.5px',
+            height:          '100%',
+            background:      `linear-gradient(to bottom,
+              transparent 0%,
+              ${color.replace(')', ',0)')} 5%,
+              ${color} 20%,
+              ${color} 80%,
+              ${color.replace(')', ',0)')} 95%,
+              transparent 100%)`,
+            transform:       `rotate(${-gamma}deg)`,
+            transformOrigin: 'center center',
+            transition:      'transform 0.08s linear, box-shadow 0.2s, background 0.2s',
+            boxShadow:       glow,
+          }} />
+
+          {/* Plumb bob at bottom */}
+          <div style={{
+            position:        'absolute',
+            bottom:          '12%',
+            width:           '8px',
+            height:          '8px',
+            borderRadius:    '50%',
+            background:      color,
+            boxShadow:       glow,
+            transform:       `translateX(${Math.sin(-gamma * Math.PI / 180) * window.innerHeight * 0.38}px)`,
+            transition:      'transform 0.08s linear, background 0.2s, box-shadow 0.2s',
+          }} />
+
+          {/* Degree label — only when notably tilted */}
+          {abs > 1.5 && (
+            <div style={{
+              position:   'absolute',
+              bottom:     '8%',
+              background: 'rgba(0,0,0,0.55)',
+              borderRadius: '999px',
+              padding:    '2px 8px',
+              color:      color,
+              fontSize:   '11px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              transform:  'translateX(0)',
+            }}>
+              {gamma > 0 ? '←' : '→'} {abs.toFixed(1)}°
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function ReadinessHUD({ videoRef, captureMode, gamma, onReadyChange }) {
       const [faceData, setFaceData] = useState(null); // { centerX, centerY, distance }
       const [hasFD,    setHasFD]    = useState(false); // FaceDetector available?
@@ -1603,6 +1679,9 @@
             <div className="absolute inset-0 z-20 pointer-events-none">
               {renderSilhouette()}
             </div>
+
+            {/* ── True vertical plumb line ── */}
+            {isReady && <TrueVertical gamma={orientation.gamma} />}
 
             {/* ── Readiness HUD (spirit level + checklist + coaching) ── */}
             {isReady && (
