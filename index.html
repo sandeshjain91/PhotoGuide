@@ -28,6 +28,7 @@
 
   <!-- Firebase Compat SDK (no build step required) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 
@@ -438,6 +439,21 @@
     let _firebaseApp = null;
     let _firestore   = null;
     let _fbStorage   = null;
+    let _firebaseAuth = null;
+
+    async function getFirebaseAuth() {
+      if (_firebaseAuth) return _firebaseAuth;
+      try {
+        if (!_firebaseApp) {
+          _firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
+        }
+        _firebaseAuth = firebase.auth();
+        return _firebaseAuth;
+      } catch (err) {
+        console.error('[Firebase Auth] init error:', err);
+        return null;
+      }
+    }
 
     async function getFirebase() {
       if (_firestore && _fbStorage) return { db: _firestore, storage: _fbStorage };
@@ -2393,6 +2409,16 @@
         setFbInitialSync(false);
       };
 
+      const handleLogout = async () => {
+        if (!confirm('Sign out? You\'ll need to log back in to access PhotoGuide.')) return;
+        try {
+          const auth = await getFirebaseAuth();
+          if (auth) await auth.signOut();
+        } catch (err) {
+          alert('Logout error: ' + err.message);
+        }
+      };
+
       const formatBytes = (bytes) => {
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -2506,6 +2532,112 @@
                 <p className="text-white/40 text-sm">Storage estimate not available</p>
               )}
               <p className="text-white/30 text-xs">Photos stored locally on this device via IndexedDB</p>
+            </div>
+
+            {/* Sign Out */}
+            <button onClick={handleLogout}
+              className="w-full py-3 bg-red-600/20 border border-red-500/40 rounded-xl text-red-400 font-bold text-sm active:scale-95"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 13b. LoginScreen ──────────────────────────────────────────── */
+    function LoginScreen() {
+      const [email,      setEmail]      = useState('');
+      const [password,   setPassword]   = useState('');
+      const [isRegister, setIsRegister] = useState(false);
+      const [loading,    setLoading]    = useState(false);
+      const [error,      setError]      = useState('');
+
+      const handleAuth = async (e) => {
+        e.preventDefault();
+        if (!email || !password) { setError('Please enter email and password'); return; }
+        setError('');
+        setLoading(true);
+        try {
+          const auth = await getFirebaseAuth();
+          if (!auth) throw new Error('Auth not available');
+
+          if (isRegister) {
+            await auth.createUserWithEmailAndPassword(email, password);
+          } else {
+            await auth.signInWithEmailAndPassword(email, password);
+          }
+        } catch (err) {
+          const msg = err.message || String(err);
+          if (msg.includes('already-exists')) setError('Email already registered. Sign in instead.');
+          else if (msg.includes('user-not-found')) setError('Email not found. Register first.');
+          else if (msg.includes('wrong-password')) setError('Incorrect password.');
+          else setError(msg.slice(0, 60));
+        }
+        setLoading(false);
+      };
+
+      return (
+        <div className="h-full flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 px-4">
+          <div className="w-full max-w-sm space-y-6">
+            {/* Header */}
+            <div className="text-center space-y-2">
+              <h1 className="text-3xl font-bold text-white">PhotoGuide</h1>
+              <p className="text-white/40 text-sm">Clinical Photography System</p>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div>
+                <label className="block text-white/50 text-sm mb-1">Email</label>
+                <input
+                  type="email" value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="clinic@example.com"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-white/50 text-sm mb-1">Password</label>
+                <input
+                  type="password" value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-500/20 border border-red-500/40 rounded-lg px-3 py-2">
+                  <p className="text-red-400 text-xs">{error}</p>
+                </div>
+              )}
+
+              <button type="submit" disabled={loading}
+                className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold text-sm active:scale-98 disabled:opacity-50"
+              >
+                {loading ? (isRegister ? 'Creating account…' : 'Signing in…') : (isRegister ? 'Create Account' : 'Sign In')}
+              </button>
+            </form>
+
+            {/* Toggle */}
+            <div className="text-center">
+              <p className="text-white/50 text-xs">
+                {isRegister ? 'Already have an account?' : 'First time?'}
+                <button
+                  onClick={() => { setIsRegister(!isRegister); setError(''); }}
+                  className="ml-1 text-blue-400 font-bold underline"
+                >
+                  {isRegister ? 'Sign in' : 'Create account'}
+                </button>
+              </p>
+            </div>
+
+            {/* Info */}
+            <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-center">
+              <p className="text-white/40 text-xs leading-relaxed">
+                For security, clinic staff must register with email and password. Only authorized users can access patient data.
+              </p>
             </div>
           </div>
         </div>
@@ -2804,8 +2936,44 @@
       );
     }
 
+    /* ── 15. AppContainer (Auth State) ────────────────────────────── */
+    function AppContainer() {
+      const [user,       setUser]       = useState(null);
+      const [authLoading, setAuthLoading] = useState(true);
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const auth = await getFirebaseAuth();
+            if (!auth) { setAuthLoading(false); return; }
+
+            auth.onAuthStateChanged((currentUser) => {
+              setUser(currentUser);
+              setAuthLoading(false);
+            });
+          } catch (err) {
+            console.error('Auth init error:', err);
+            setAuthLoading(false);
+          }
+        })();
+      }, []);
+
+      if (authLoading) {
+        return (
+          <div className="h-full flex items-center justify-center bg-slate-900">
+            <div className="text-center space-y-3">
+              <div className="w-12 h-12 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-white/40 text-sm">Loading PhotoGuide…</p>
+            </div>
+          </div>
+        );
+      }
+
+      return user ? <App /> : <LoginScreen />;
+    }
+
     /* ── Mount ─────────────────────────────────────────────────────── */
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    ReactDOM.createRoot(document.getElementById('root')).render(<AppContainer />);
   </script>
 </body>
 </html>
