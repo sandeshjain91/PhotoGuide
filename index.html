@@ -774,7 +774,7 @@
         /* Get access token (silent re-auth if session active) */
         const token = await new Promise((resolve, reject) => {
           if (!window.google?.accounts?.oauth2) { reject(new Error('GIS not loaded')); return; }
-          const client = google.accounts.oauth2.initTokenModel({
+          const client = google.accounts.oauth2.initTokenClient({
             client_id: clientId,
             scope: 'https://www.googleapis.com/auth/drive.file',
             callback: (resp) => {
@@ -3115,7 +3115,7 @@
               reject(new Error('Google Identity Services not loaded. Check your internet connection.'));
               return;
             }
-            const client = google.accounts.oauth2.initTokenModel({
+            const client = google.accounts.oauth2.initTokenClient({
               client_id: clientId.trim(),
               scope: 'https://www.googleapis.com/auth/drive.file',
               callback: (resp) => {
