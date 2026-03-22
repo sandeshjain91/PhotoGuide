@@ -335,6 +335,14 @@
       from { transform: rotate(0deg); }
       to   { transform: rotate(360deg); }
     }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
     .sync-spin { animation: spin-sync 1.1s linear infinite; }
     @keyframes sync-pulse {
       0%, 100% { opacity: 1; }
@@ -401,6 +409,43 @@
     ================================================================ */
 
     const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+    /* ── Toast notification system ────────────────────────────────── */
+    const _toastListeners = new Set();
+    let _toasts = [];
+    let _toastId = 0;
+    function showToast(message, type = 'error', duration = 4000) {
+      const id = ++_toastId;
+      _toasts = [..._toasts, { id, message, type }];
+      _toastListeners.forEach(fn => fn(_toasts));
+      setTimeout(() => {
+        _toasts = _toasts.filter(t => t.id !== id);
+        _toastListeners.forEach(fn => fn(_toasts));
+      }, duration);
+    }
+    function useToasts() {
+      const [toasts, setToasts] = useState(_toasts);
+      useEffect(() => {
+        _toastListeners.add(setToasts);
+        return () => _toastListeners.delete(setToasts);
+      }, []);
+      return toasts;
+    }
+    function ToastContainer() {
+      const toasts = useToasts();
+      if (!toasts.length) return null;
+      const colors = { error: '#ef4444', warn: '#f59e0b', info: '#3b82f6', success: '#10b981' };
+      return React.createElement('div', {
+        style: { position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+                 zIndex: 99999, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '90vw' }
+      }, toasts.map(t =>
+        React.createElement('div', { key: t.id, style: {
+          background: colors[t.type] || colors.error, color: '#fff', padding: '10px 18px',
+          borderRadius: 12, fontSize: 13, fontWeight: 500, boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+          animation: 'fadeIn 0.2s ease-out',
+        }}, t.message)
+      ));
+    }
 
     /* ── 1. Constants ──────────────────────────────────────────────── */
 
@@ -757,12 +802,37 @@
     const DRIVE_API  = 'https://www.googleapis.com/drive/v3/files';
     const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
 
+    /* Cached Drive token — automatically re-requested when expired */
+    let _driveToken = null;
+    let _driveTokenExpiry = 0;
+
+    async function getDriveToken(forceRefresh = false) {
+      if (!forceRefresh && _driveToken && Date.now() < _driveTokenExpiry) return _driveToken;
+      if (!window.google?.accounts?.oauth2) throw new Error('GIS not loaded');
+      return new Promise((resolve, reject) => {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: DRIVE_CLIENT_ID,
+          scope: 'https://www.googleapis.com/auth/drive.file',
+          callback: (resp) => {
+            if (resp.error) reject(new Error(resp.error));
+            else {
+              _driveToken = resp.access_token;
+              _driveTokenExpiry = Date.now() + ((resp.expires_in || 3600) - 60) * 1000; /* 1 min buffer */
+              resolve(resp.access_token);
+            }
+          },
+        });
+        client.requestAccessToken({ prompt: '' });
+      });
+    }
+
     const DriveAPI = {
       async findOrCreateFolder(name, parentId, token) {
         const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
         const searchRes = await fetch(`${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name)`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+        if (!searchRes.ok) throw new Error(`Drive search ${searchRes.status}: ${await searchRes.text()}`);
         const data = await searchRes.json();
         if (data.files?.length > 0) return data.files[0].id;
 
@@ -771,6 +841,7 @@
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
         });
+        if (!createRes.ok) throw new Error(`Drive create folder ${createRes.status}: ${await createRes.text()}`);
         const folder = await createRes.json();
         return folder.id;
       },
@@ -786,6 +857,7 @@
           headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
+        if (!res.ok) throw new Error(`Drive upload ${res.status}: ${await res.text()}`);
         const result = await res.json();
         return result.id;
       },
@@ -823,39 +895,46 @@
         const driveEnabled = await DB.getSetting('driveEnabled');
         if (!driveEnabled) { _uploadRunning = false; window._syncState.drive.running = false; return; }
 
+        /* Recover any items stuck in 'uploading' from a previous crash/refresh */
+        const stuck = await DB.getUploadQueue('uploading');
+        for (const s of stuck) {
+          s.status = 'pending';
+          await DB.updateUploadItem(s);
+        }
+
         const pending = await DB.getUploadQueue('pending');
         window._syncState.drive.pending = pending.length;
         if (pending.length === 0) { _uploadRunning = false; window._syncState.drive.running = false; return; }
 
-        /* Get access token — uses hardcoded clinic Drive client ID */
-        const token = await new Promise((resolve, reject) => {
-          if (!window.google?.accounts?.oauth2) { reject(new Error('GIS not loaded')); return; }
-          const client = google.accounts.oauth2.initTokenClient({
-            client_id: DRIVE_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/drive.file',
-            callback: (resp) => {
-              if (resp.error) reject(new Error(resp.error));
-              else resolve(resp.access_token);
-            },
-          });
-          client.requestAccessToken({ prompt: '' });
-        });
+        /* Get access token — cached, auto-refreshes on expiry */
+        let token = await getDriveToken();
 
         for (const item of pending) {
           try {
             item.status = 'uploading';
             await DB.updateUploadItem(item);
 
-            const folderId = await DriveAPI.ensureFolderHierarchy(
-              item.patientName, item.procedureName || 'General', token
-            );
+            /* Retry once with a fresh token on 401 (expired) */
+            let folderId, uploadDone = false;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                folderId = await DriveAPI.ensureFolderHierarchy(
+                  item.patientName, item.procedureName || 'General', token
+                );
+                const resp = await fetch(item.dataUrl);
+                const blob = await resp.blob();
+                await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
+                uploadDone = true;
+                break;
+              } catch (e) {
+                if (attempt === 0 && (e.message?.includes('401') || e.message?.includes('Invalid Credentials'))) {
+                  console.warn('[Drive] Token expired, refreshing…');
+                  token = await getDriveToken(true);
+                } else throw e;
+              }
+            }
 
-            /* Convert dataUrl to blob for upload */
-            const resp = await fetch(item.dataUrl);
-            const blob = await resp.blob();
-
-            await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
-            item.status = 'done';
+            item.status = uploadDone ? 'done' : 'error';
             await DB.updateUploadItem(item);
           } catch (err) {
             console.error('Drive upload error:', err);
@@ -1028,6 +1107,13 @@
       try {
         const fb = await getFirebase();
         if (!fb) { _fbSyncRunning = false; window._syncState.firebase.running = false; return; }
+
+        /* Recover any items stuck in 'uploading' from a previous crash/refresh */
+        const stuckFb = await DB.getFirebaseQueue('uploading');
+        for (const s of stuckFb) {
+          s.status = 'pending';
+          await DB.updateFirebaseItem(s);
+        }
 
         const pending = await DB.getFirebaseQueue('pending');
         for (const item of pending) {
@@ -2508,7 +2594,7 @@
 
       const handleAddProcedure = async (proc) => {
         await DB.saveProcedure(proc);
-        enqueueFirebaseSync('sync_procedure', proc).catch(() => {});
+        enqueueFirebaseSync('sync_procedure', proc).catch(e => { console.error('[Sync] procedure sync failed:', e); showToast('Procedure sync failed — will retry', 'warn'); });
         setShowAddProc(false);
         load();
       };
@@ -2516,7 +2602,8 @@
       const deleteProcedure = async (id) => {
         if (!confirm('Delete this procedure and all its photos? This cannot be undone.')) return;
         await DB.deleteProcedure(id);
-        enqueueFirebaseSync('delete_procedure', { id, patientId: patient.id }).catch(() => {});
+        enqueueFirebaseSync('delete_procedure', { id, patientId: patient.id }).catch(e => { console.error('[Sync] procedure delete sync failed:', e); showToast('Delete sync failed — will retry', 'warn'); });
+        showToast('Procedure deleted', 'success', 2500);
         load();
       };
 
@@ -2639,11 +2726,14 @@
     }
 
     /* ── 10c. ProcedureDetailView (photos within a procedure) ──── */
+    const PHOTOS_PER_PAGE = 30;
+
     function ProcedureDetailView({ patient, procedure, onBack, onStartCamera }) {
       const [photos,       setPhotos]       = useState([]);
       const [viewPhoto,    setViewPhoto]    = useState(null);
       const [filterMode,   setFilterMode]   = useState('all');
       const [filterType,   setFilterType]   = useState('all');
+      const [visibleCount, setVisibleCount] = useState(PHOTOS_PER_PAGE);
 
       const loadPhotos = useCallback(async () => {
         const list = await DB.getPhotosByProcedure(procedure.id);
@@ -2674,6 +2764,11 @@
       const deletePhoto = async (id) => {
         if (!confirm('Delete this photo? This cannot be undone.')) return;
         await DB.deletePhoto(id);
+        enqueueFirebaseSync('delete_photo', { id, patientId: patient.id }).catch(err => {
+          console.error('[Sync] Failed to enqueue photo delete:', err);
+          showToast('Delete sync failed — will retry', 'warn');
+        });
+        showToast('Photo deleted', 'success', 2500);
         setViewPhoto(null);
         loadPhotos();
       };
@@ -2684,7 +2779,11 @@
         return true;
       });
 
-      const grouped = filtered.reduce((acc, p) => {
+      const totalFiltered = filtered.length;
+      const visible = filtered.slice(0, visibleCount);
+      const hasMore = totalFiltered > visibleCount;
+
+      const grouped = visible.reduce((acc, p) => {
         const d = new Date(p.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' });
         (acc[d] ??= []).push(p);
         return acc;
@@ -2859,6 +2958,17 @@
                   </div>
                 </div>
               ))
+            )}
+
+            {/* Show More button when there are more photos */}
+            {hasMore && (
+              <div className="text-center py-4">
+                <button onClick={() => setVisibleCount(c => c + PHOTOS_PER_PAGE)}
+                  className="px-6 py-2.5 rounded-xl text-sm font-medium active:scale-95 transition-transform"
+                  style={{background:'var(--pg-surface)', border:'1px solid var(--pg-border)', color:'var(--pg-text)', boxShadow:'var(--pg-card-shadow)'}}>
+                  Show More ({totalFiltered - visibleCount} remaining)
+                </button>
+              </div>
             )}
           </div>
 
@@ -3234,17 +3344,24 @@
                 /* ── Auto-enqueue ALL existing photos (old + new) ── */
                 const patients = await DB.getPatients();
                 let queued = 0;
+                /* Build set of already-queued photoIds to avoid duplicates */
+                const existingPending = await DB.getUploadQueue('pending');
+                const existingUploading = await DB.getUploadQueue('uploading');
+                const alreadyQueued = new Set(
+                  [...existingPending, ...existingUploading].map(i => i.photoId).filter(Boolean)
+                );
                 for (const pat of patients) {
                   const procs = await DB.getProceduresByPatient(pat.id);
                   for (const proc of procs) {
                     const photos = await DB.getPhotosByProcedure(proc.id);
                     for (const ph of photos) {
                       if (!ph.dataUrl) continue;
+                      if (alreadyQueued.has(ph.id)) continue; /* skip duplicates */
                       await DB.addToUploadQueue({
                         photoId:       ph.id,
                         patientName:   pat.name,
-                        procedureName: proc.name || proc.type || 'Visit',
-                        filename:      ph.filename || `${ph.type}_${ph.id}.jpg`,
+                        procedureName: proc.name || proc.category || 'Visit',
+                        filename:      ph.filename || `${ph.captureMode || 'photo'}_${ph.id}.jpg`,
                         dataUrl:       ph.dataUrl,
                         status:        'pending',
                       });
@@ -3252,7 +3369,7 @@
                     }
                   }
                 }
-                setPendingCount(queued);
+                setPendingCount(queued + existingPending.length);
                 /* Start uploading silently in background */
                 processUploadQueue();
               } catch (err) {
@@ -3803,6 +3920,9 @@
       const [showTypeModal,  setShowTypeModal]  = useState(false);
       const [showGhostSel,   setShowGhostSel]   = useState(false);
 
+      /* Photo saving state */
+      const [savingPhoto, setSavingPhoto] = useState(false);
+
       /* PWA install */
       const [installPrompt,  setInstallPrompt]  = useState(null);
       const [showInstall,    setShowInstall]     = useState(false);
@@ -3823,10 +3943,12 @@
       /* ── Real-time Firestore → IndexedDB → UI listener ── */
       useEffect(() => {
         let unsub = null;
+        let cancelled = false; /* guard against late subscription after unmount */
         (async () => {
           const fb = await getFirebase();
-          if (!fb) return;
-          unsub = fb.db.collection('patients').onSnapshot(async (snap) => {
+          if (!fb || cancelled) return;
+          const listener = fb.db.collection('patients').onSnapshot(async (snap) => {
+            if (cancelled) return;
             for (const change of snap.docChanges()) {
               if (change.type === 'added' || change.type === 'modified') {
                 const d = change.doc.data();
@@ -3835,20 +3957,23 @@
                   createdAt: d.createdAt?.toMillis?.() || d.createdAt || Date.now(),
                 });
               } else if (change.type === 'removed') {
-                /* patient deleted elsewhere — remove locally */
-                try { await DB.deletePatient(change.doc.id); } catch (_) {}
+                try { await DB.deletePatient(change.doc.id); } catch (err) {
+                  console.warn('[Sync] Could not delete patient locally:', err);
+                }
               }
             }
             loadPatients();
-          }, () => { /* ignore snapshot errors (offline) */ });
+          }, (err) => { console.warn('[Firestore] snapshot error (offline?):', err); });
+          if (cancelled) { listener(); return; } /* component already unmounted */
+          unsub = listener;
         })();
-        return () => unsub?.();
+        return () => { cancelled = true; unsub?.(); };
       }, [loadPatients]);
 
       /* ── Service worker registration ── */
       useEffect(() => {
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('./sw.js').catch(() => {});
+          navigator.serviceWorker.register('./sw.js').catch(e => console.error('[SW] registration failed:', e));
         }
       }, []);
 
@@ -3872,7 +3997,7 @@
       /* ── Handlers ── */
       const handleAddPatient = async (data) => {
         await DB.savePatient(data);
-        enqueueFirebaseSync('sync_patient', data).catch(() => {});
+        enqueueFirebaseSync('sync_patient', data).catch(e => { console.error('[Sync] patient sync failed:', e); showToast('Patient sync failed — will retry', 'warn'); });
         await loadPatients();
         setShowAddPatient(false);
       };
@@ -3921,6 +4046,8 @@
        *   • Return to patient detail.
        */
       const handleCapture = useCallback(async (photoData, blob) => {
+        setSavingPhoto(true);
+        try {
         const photoRecord = {
           ...photoData,
           patientId:   activePatient.id,
@@ -3941,7 +4068,7 @@
             const fh = await window.showSaveFilePicker({
               suggestedName: filename,
               types: [{ description: 'JPEG Image', accept: { 'image/jpeg': ['.jpg'] } }],
-            }).catch(() => null);
+            }).catch(e => { console.warn('[Save] file picker cancelled or failed:', e); return null; });
             if (fh) {
               const writable = await fh.createWritable();
               await writable.write(blob);
@@ -3972,18 +4099,21 @@
             });
             processUploadQueue();
             if (navigator.serviceWorker?.ready) {
-              navigator.serviceWorker.ready.then(reg => reg.sync?.register('sync-photos')).catch(() => {});
+              navigator.serviceWorker.ready.then(reg => reg.sync?.register('sync-photos')).catch(e => console.error('[SW] background sync registration failed:', e));
             }
           }
-        } catch (_) {}
+        } catch (e) { console.error('[Drive] queue upload failed:', e); showToast('Drive upload queue failed', 'warn'); }
 
         /* 4. Queue Firebase sync */
         try {
           await enqueueFirebaseSync('sync_photo', { ...photoRecord, id: photoId }, photoData.dataUrl);
-        } catch (_) {}
+        } catch (e) { console.error('[Sync] photo sync failed:', e); showToast('Photo sync failed — will retry', 'warn'); }
+
+        showToast('Photo saved', 'success', 2500);
 
         /* 5. Return to detail view */
         setTimeout(() => setView(activeProcedure ? 'procedure-detail' : 'patient-detail'), 350);
+        } finally { setSavingPhoto(false); }
       }, [activePatient, activeProcedure]);
 
       const triggerDownload = (blob, filename) => {
@@ -4053,6 +4183,16 @@
               onClose={() => setView(activeProcedure ? 'procedure-detail' : 'patient-detail')}
               patientName={activePatient?.name}
             />
+          )}
+
+          {/* Saving overlay */}
+          {savingPhoto && (
+            <div className="dark-layer" style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+              <div style={{ width: 40, height: 40, border: '3px solid rgba(255,255,255,0.3)', borderTopColor: '#fff',
+                borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+              <span style={{ color: '#fff', fontSize: 15, fontWeight: 500 }}>Saving photo…</span>
+            </div>
           )}
 
           {/* Settings */}
@@ -4259,7 +4399,7 @@
     }
 
     /* ── Mount ─────────────────────────────────────────────────────── */
-    ReactDOM.createRoot(document.getElementById('root')).render(<AppContainer />);
+    ReactDOM.createRoot(document.getElementById('root')).render(<><AppContainer /><ToastContainer /></>);
   </script>
 </body>
 </html>
