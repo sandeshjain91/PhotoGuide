@@ -3110,27 +3110,53 @@
         await saveClientId();
         setSigningIn(true);
         try {
+          const id = clientId.trim();
+          console.log('[OAuth] Initiating sign-in with Client ID:', id.slice(0, 20) + '...');
+
+          if (!window.google?.accounts?.oauth2) {
+            throw new Error('Google Identity Services not loaded. Refresh the page and try again.');
+          }
+
           const token = await new Promise((resolve, reject) => {
-            if (!window.google?.accounts?.oauth2) {
-              reject(new Error('Google Identity Services not loaded. Check your internet connection.'));
-              return;
-            }
             let resolved = false;
             const timeoutId = setTimeout(() => {
-              if (!resolved) reject(new Error('Sign-in timed out. Check your OAuth Client ID and try again.'));
-            }, 15000);
+              if (!resolved) {
+                console.error('[OAuth] Callback timeout — popup may have been blocked or cancelled');
+                reject(new Error(
+                  'Sign-in popup did not respond.\n\n' +
+                  'Possible causes:\n' +
+                  '• Popup was blocked by browser\n' +
+                  '• You closed the popup without completing sign-in\n' +
+                  '• Invalid or mismatched OAuth Client ID\n' +
+                  '• Client ID not authorized for this domain\n\n' +
+                  'Verify your Client ID is correct and try again.'
+                ));
+              }
+            }, 20000);
 
-            const client = google.accounts.oauth2.initTokenClient({
-              client_id: clientId.trim(),
-              scope: 'https://www.googleapis.com/auth/drive.file',
-              callback: (resp) => {
-                clearTimeout(timeoutId);
-                resolved = true;
-                if (resp.error) reject(new Error(resp.error_description || resp.error));
-                else resolve(resp.access_token);
-              },
-            });
-            client.requestAccessToken({ prompt: 'consent' });
+            try {
+              const client = google.accounts.oauth2.initTokenClient({
+                client_id: id,
+                scope: 'https://www.googleapis.com/auth/drive.file',
+                callback: (resp) => {
+                  clearTimeout(timeoutId);
+                  resolved = true;
+                  console.log('[OAuth] Callback received:', resp.error ? 'ERROR' : 'SUCCESS');
+                  if (resp.error) {
+                    console.error('[OAuth] Error:', resp.error, resp.error_description);
+                    reject(new Error(resp.error_description || resp.error));
+                  } else {
+                    resolve(resp.access_token);
+                  }
+                },
+              });
+              console.log('[OAuth] Client initialized, requesting token...');
+              client.requestAccessToken({ prompt: 'consent' });
+            } catch (e) {
+              clearTimeout(timeoutId);
+              console.error('[OAuth] Failed to init client:', e);
+              reject(e);
+            }
           });
 
           /* Get user email */
