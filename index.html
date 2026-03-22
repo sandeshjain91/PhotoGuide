@@ -1062,61 +1062,58 @@
     });
 
     /* ── 3. FrontalGuide ────────────────────────────────────────────── */
+    /*
+     * Based on clinical reference: solid vertical midline + solid horizontal
+     * pupillary line (at inner-canthus / eye level), crosshair at their
+     * intersection (nasion), and corner alignment brackets.
+     */
     function FrontalGuide({ ready = false }) {
-      const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';  // cyan → emerald
-      const g  = ready ? 'rgba(253,200,50,' : 'rgba(253,200,50,';  // gold stays gold
+      const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
+      const g  = 'rgba(253,200,50,';
       const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
-      const xh = ready ? 'guide-crosshair-rdy' : 'guide-crosshair';
+      // Eye line sits at ~40% of frame height (upper facial third)
+      const EYE_Y = 42;
       return (
         <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
           {/* ── Animated scan line ── */}
           <rect x="0" y="0" width="100" height="0.6"
             fill={`${c}0.35)`} className="guide-scanline" />
 
-          {/* ── Rule-of-thirds vertical lines ── */}
-          <line x1="33.3" y1="5" x2="33.3" y2="128"
-            stroke={`${c}0.28)`} strokeWidth="0.5" strokeDasharray="1.5,3" />
-          <line x1="66.6" y1="5" x2="66.6" y2="128"
-            stroke={`${c}0.28)`} strokeWidth="0.5" strokeDasharray="1.5,3" />
+          {/* ── Vertical midline — solid, full height ── */}
+          <line x1="50" y1="4" x2="50" y2="129"
+            stroke={`${c}0.65)`} strokeWidth="0.85" />
 
-          {/* ── Rule-of-thirds horizontal lines ── */}
-          <line x1="5" y1="44.3" x2="95" y2="44.3"
-            stroke={`${c}0.22)`} strokeWidth="0.45" strokeDasharray="1.5,3" />
-          <line x1="5" y1="88.6" x2="95" y2="88.6"
-            stroke={`${c}0.22)`} strokeWidth="0.45" strokeDasharray="1.5,3" />
+          {/* ── Horizontal pupillary / eye line — solid ── */}
+          <line x1="4" y1={EYE_Y} x2="96" y2={EYE_Y}
+            stroke={`${c}0.65)`} strokeWidth="0.85" />
 
-          {/* ── Thirds intersection diamonds ── */}
-          {[[33.3,44.3],[66.6,44.3],[33.3,88.6],[66.6,88.6]].map(([cx,cy],i) => (
-            <g key={i}>
-              <circle cx={cx} cy={cy} r="1.4" fill={`${c}0.5)`} />
-              <circle cx={cx} cy={cy} r="2.8" fill="none" stroke={`${c}0.25)`} strokeWidth="0.4" />
-            </g>
-          ))}
-
-          {/* ── Gold eye-line (upper third) — bright & pulsing ── */}
-          <line x1="6" y1="44.3" x2="94" y2="44.3"
-            stroke={`${g}0.85)`} strokeWidth="0.8" strokeDasharray="5,2.5"
-            className="guide-frankfort" />
-          <text x="5" y="42.5"
-            fill={`${g}0.75)`} fontSize="3.2" fontFamily="monospace" fontWeight="bold">
-            ▶ EYE LINE
-          </text>
-
-          {/* ── Vertical midline ── */}
-          <line x1="50" y1="6" x2="50" y2="127"
-            stroke={`${c}0.5)`} strokeWidth="0.6" strokeDasharray="3,3" />
-
-          {/* ── Center crosshair (face target) ── */}
-          <g className={xh}>
-            <line x1="43" y1="55" x2="57" y2="55" stroke={`${c}0.9)`} strokeWidth="0.9" />
-            <line x1="50" y1="48" x2="50" y2="62" stroke={`${c}0.9)`} strokeWidth="0.9" />
-            <circle cx="50" cy="55" r="10"
-              fill="none" stroke={`${c}0.45)`} strokeWidth="0.6" />
-            <circle cx="50" cy="55" r="4"
-              fill="none" stroke={`${c}0.6)`} strokeWidth="0.5" />
+          {/* ── Frankfort / eye-line label ── */}
+          <g className="guide-frankfort">
+            {/* Bold highlight segment over the eye line */}
+            <line x1="4" y1={EYE_Y} x2="96" y2={EYE_Y}
+              stroke={`${g}0.7)`} strokeWidth="0.75" strokeDasharray="4,3" />
+            <text x="6" y={EYE_Y - 2}
+              fill={`${g}0.75)`} fontSize="3" fontFamily="monospace" fontWeight="bold">
+              PUPILLARY LINE
+            </text>
           </g>
 
-          {/* ── Corner alignment brackets — animated ── */}
+          {/* ── Crosshair at intersection (nasion level) ── */}
+          <g className={ready ? 'guide-crosshair-rdy' : 'guide-crosshair'}>
+            {/* Bold cross arms */}
+            <line x1="42" y1={EYE_Y} x2="58" y2={EYE_Y}
+              stroke={`${c}1)`} strokeWidth="1.4" />
+            <line x1="50" y1={EYE_Y - 8} x2="50" y2={EYE_Y + 8}
+              stroke={`${c}1)`} strokeWidth="1.4" />
+            {/* Center dot */}
+            <circle cx="50" cy={EYE_Y} r="1.6"
+              fill={`${c}0.95)`} />
+            {/* Outer ring */}
+            <circle cx="50" cy={EYE_Y} r="5"
+              fill="none" stroke={`${c}0.4)`} strokeWidth="0.6" />
+          </g>
+
+          {/* ── Corner alignment brackets ── */}
           <g className={bk}>
             <path d="M 6 6 L 6 19 M 6 6 L 19 6"
               stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
@@ -1131,7 +1128,7 @@
           {/* ── Label ── */}
           <text x="50" y="131" textAnchor="middle"
             fill={`${c}0.65)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.8">
-            {ready ? '✓ FRONT' : 'FRONT'}
+            {ready ? '✓ FRONT' : 'FRONT · ALIGN MIDLINE & EYES'}
           </text>
         </svg>
       );
@@ -1147,9 +1144,11 @@
       const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
       const g  = 'rgba(253,200,50,';
       const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
-      const isRight  = side === 'right';
-      const orbitX   = isRight ? 70 : 30;
-      const tragusX  = isRight ? 30 : 70;
+      const isRight = side === 'right';
+      // Tragus X: ear side of frame. Left profile = patient faces right → ear on right (~70)
+      const tragusX = isRight ? 30 : 70;
+      const orbitX  = isRight ? 70 : 30;
+      const FP_Y = 49; // Frankfort plane Y (~40% down)
 
       return (
         <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
@@ -1157,32 +1156,48 @@
           <rect x="0" y="0" width="100" height="0.6"
             fill={`${c}0.35)`} className="guide-scanline" />
 
-          {/* ── Vertical midline ── */}
-          <line x1="50" y1="6" x2="50" y2="127"
-            stroke={`${c}0.45)`} strokeWidth="0.6" strokeDasharray="3,3" />
+          {/* ── Frankfort Horizontal Plane — solid, full width ── */}
+          <line x1="4" y1={FP_Y} x2="96" y2={FP_Y}
+            stroke={`${c}0.65)`} strokeWidth="0.85" />
 
-          {/* ── Frankfort Horizontal Plane — gold, prominent, pulsing ── */}
+          {/* ── Gold Frankfort overlay + label ── */}
           <g className="guide-frankfort">
-            <line x1="5" y1="49" x2="95" y2="49"
-              stroke={`${g}0.9)`} strokeWidth="1.1" strokeDasharray="5,2.5" />
-            <text x="7" y="46.5"
-              fill={`${g}0.85)`} fontSize="3.4" fontFamily="monospace" fontWeight="bold">
-              ── FRANKFORT PLANE ──
+            <line x1="4" y1={FP_Y} x2="96" y2={FP_Y}
+              stroke={`${g}0.6)`} strokeWidth="0.75" strokeDasharray="4,3" />
+            <text x={isRight ? 35 : 5} y={FP_Y - 2.5}
+              fill={`${g}0.8)`} fontSize="3" fontFamily="monospace" fontWeight="bold">
+              FRANKFORT PLANE
             </text>
           </g>
 
-          {/* ── Orbital rim landmark ── */}
-          <g className="guide-breathe">
-            <circle cx={orbitX} cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
-            <text x={orbitX} y="55.5" textAnchor="middle"
-              fill={`${g}0.75)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">ORBIT</text>
+          {/* ── Vertical line at tragus — solid, full height ── */}
+          <line x1={tragusX} y1="4" x2={tragusX} y2="129"
+            stroke={`${c}0.65)`} strokeWidth="0.85" />
+
+          {/* ── Crosshair at tragus/Frankfort intersection ── */}
+          <g className={ready ? 'guide-crosshair-rdy' : 'guide-crosshair'}>
+            <line x1={tragusX - 8} y1={FP_Y} x2={tragusX + 8} y2={FP_Y}
+              stroke={`${c}1)`} strokeWidth="1.4" />
+            <line x1={tragusX} y1={FP_Y - 8} x2={tragusX} y2={FP_Y + 8}
+              stroke={`${c}1)`} strokeWidth="1.4" />
+            <circle cx={tragusX} cy={FP_Y} r="1.6"
+              fill={`${c}0.95)`} />
+            <circle cx={tragusX} cy={FP_Y} r="5"
+              fill="none" stroke={`${c}0.35)`} strokeWidth="0.6" />
           </g>
 
-          {/* ── Tragus landmark ── */}
+          {/* ── Tragus label ── */}
+          <g className="guide-breathe">
+            <text x={tragusX} y={FP_Y + 11} textAnchor="middle"
+              fill={`${g}0.8)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">TRAGUS</text>
+          </g>
+
+          {/* ── Orbital rim dot ── */}
           <g className="guide-breathe" style={{ animationDelay: '1.4s' }}>
-            <circle cx={tragusX} cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
-            <text x={tragusX} y="55.5" textAnchor="middle"
-              fill={`${g}0.75)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">TRAGUS</text>
+            <circle cx={orbitX} cy={FP_Y} r="2.2"
+              fill={`${g}0.15)`} stroke={`${g}0.8)`} strokeWidth="0.7" />
+            <text x={orbitX} y={FP_Y + 7} textAnchor="middle"
+              fill={`${g}0.7)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">ORBIT</text>
           </g>
 
           {/* ── Corner brackets ── */}
@@ -1199,8 +1214,8 @@
 
           {/* ── Label ── */}
           <text x="50" y="131" textAnchor="middle"
-            fill={`${c}0.7)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.5">
-            {ready ? '✓ ' : ''}{isRight ? 'RIGHT' : 'LEFT'} PROFILE
+            fill={`${c}0.7)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.3">
+            {ready ? '✓ ' : ''}{isRight ? 'RIGHT' : 'LEFT'} PROFILE · ALIGN EAR
           </text>
         </svg>
       );
