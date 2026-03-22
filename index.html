@@ -854,6 +854,16 @@
       return getDriveToken(true, 'consent');
     }
 
+    /* iOS Safari does not support fetch('data:...') — use atob instead */
+    function dataUrlToBlob(dataUrl) {
+      const [header, b64] = dataUrl.split(',');
+      const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: mime });
+    }
+
     /* Called on app startup — silently re-auth if user previously authorized.
        Waits up to 8s for GIS script to load, then attempts silent token. */
     async function tryDriveSilentAuth() {
@@ -940,12 +950,11 @@
       _uploadRunning = true;
       window._syncState.drive.running = true;
       try {
-        /* Recover any items stuck in 'uploading' from a previous crash/refresh */
+        /* Recover items stuck in 'uploading' and reset 'error' items for retry */
         const stuck = await DB.getUploadQueue('uploading');
-        for (const s of stuck) {
-          s.status = 'pending';
-          await DB.updateUploadItem(s);
-        }
+        for (const s of stuck) { s.status = 'pending'; await DB.updateUploadItem(s); }
+        const errored = await DB.getUploadQueue('error');
+        for (const e of errored) { e.status = 'pending'; e.retries = 0; await DB.updateUploadItem(e); }
 
         const pending = await DB.getUploadQueue('pending');
         window._syncState.drive.pending = pending.length;
@@ -970,15 +979,15 @@
             const folderId = await DriveAPI.ensureFolderHierarchy(
               item.patientName, item.procedureName || 'General', token
             );
-            const resp = await fetch(item.dataUrl);
-            const blob = await resp.blob();
+            /* Use atob-based converter — fetch('data:...') fails on iOS Safari */
+            const blob = dataUrlToBlob(item.dataUrl);
             await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
             item.status = 'done';
             await DB.updateUploadItem(item);
           } catch (err) {
-            console.error('[Drive] Upload error for', item.filename, ':', err.message);
+            console.error('[Drive] Upload error for', item.filename, ':', err.message, err);
             item.retries = (item.retries || 0) + 1;
-            item.status = item.retries >= 3 ? 'error' : 'pending';
+            item.status = item.retries >= 5 ? 'error' : 'pending';
             await DB.updateUploadItem(item);
           }
         }
