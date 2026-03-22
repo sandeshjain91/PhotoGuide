@@ -841,23 +841,28 @@
     }
 
     /* ── 4. ProfileGuide ────────────────────────────────────────────── */
+    /*
+     * Landmark positions by side — no SVG flip needed (avoids mirrored text):
+     *   Left  profile: patient faces RIGHT  → Orbit LEFT (30),  Tragus RIGHT (70)
+     *   Right profile: patient faces LEFT   → Orbit RIGHT (70), Tragus LEFT  (30)
+     */
     function ProfileGuide({ side = 'left', ready = false }) {
       const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
       const g  = 'rgba(253,200,50,';
       const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
-      /* Mirror all guide content for right profile so landmarks are correct
-         without needing to flip the live video preview. */
-      const flip = side === 'right' ? 'translate(100,0) scale(-1,1)' : '';
+      const isRight  = side === 'right';
+      const orbitX   = isRight ? 70 : 30;
+      const tragusX  = isRight ? 30 : 70;
+
       return (
         <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
-          {/* ── Animated scan line (outside flip group — always left→right) ── */}
+          {/* ── Animated scan line ── */}
           <rect x="0" y="0" width="100" height="0.6"
             fill={`${c}0.35)`} className="guide-scanline" />
-          <g transform={flip}>
 
-          {/* ── Vertical plumb line ── */}
-          <line x1="50" y1="5" x2="50" y2="128"
-            stroke={`${c}0.4)`} strokeWidth="0.6" strokeDasharray="3,4" />
+          {/* ── Vertical midline ── */}
+          <line x1="50" y1="6" x2="50" y2="127"
+            stroke={`${c}0.45)`} strokeWidth="0.6" strokeDasharray="3,3" />
 
           {/* ── Frankfort Horizontal Plane — gold, prominent, pulsing ── */}
           <g className="guide-frankfort">
@@ -869,23 +874,19 @@
             </text>
           </g>
 
-          {/* ── Orbital rim — LEFT side of frame (front of face for left profile) ── */}
+          {/* ── Orbital rim landmark ── */}
           <g className="guide-breathe">
-            <circle cx="30" cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
-            <text x="30" y="55.5" textAnchor="middle"
+            <circle cx={orbitX} cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
+            <text x={orbitX} y="55.5" textAnchor="middle"
               fill={`${g}0.75)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">ORBIT</text>
           </g>
 
-          {/* ── Tragus — RIGHT side of frame (ear/back of head for left profile) ── */}
+          {/* ── Tragus landmark ── */}
           <g className="guide-breathe" style={{ animationDelay: '1.4s' }}>
-            <circle cx="70" cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
-            <text x="70" y="55.5" textAnchor="middle"
+            <circle cx={tragusX} cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
+            <text x={tragusX} y="55.5" textAnchor="middle"
               fill={`${g}0.75)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">TRAGUS</text>
           </g>
-
-          {/* ── Vertical plumb / midline ── */}
-          <line x1="50" y1="6" x2="50" y2="127"
-            stroke={`${c}0.45)`} strokeWidth="0.6" strokeDasharray="3,3" />
 
           {/* ── Corner brackets ── */}
           <g className={bk}>
@@ -902,9 +903,8 @@
           {/* ── Label ── */}
           <text x="50" y="131" textAnchor="middle"
             fill={`${c}0.7)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.5">
-            {ready ? '✓ ' : ''}{side === 'left' ? 'LEFT' : 'RIGHT'} PROFILE
+            {ready ? '✓ ' : ''}{isRight ? 'RIGHT' : 'LEFT'} PROFILE
           </text>
-          </g>{/* end flip group */}
         </svg>
       );
     }
@@ -1121,65 +1121,67 @@
       const abs    = Math.abs(gamma);
       const isTrue = abs < 1.5;
       const isNear = abs < 5;
-      const color  = isTrue
-        ? 'rgba(52,211,153,0.85)'
-        : isNear
-        ? 'rgba(251,191,36,0.75)'
-        : 'rgba(255,255,255,0.55)';
-      const glow = isTrue
-        ? '0 0 8px rgba(52,211,153,0.8)'
-        : isNear
-        ? '0 0 6px rgba(251,191,36,0.6)'
-        : 'none';
+      const color  = isTrue ? 'rgba(52,211,153,0.9)'
+                   : isNear ? 'rgba(251,191,36,0.8)'
+                   :          'rgba(255,255,255,0.6)';
+      const glow   = isTrue ? '0 0 8px rgba(52,211,153,0.85)'
+                   : isNear ? '0 0 6px rgba(251,191,36,0.7)'
+                   :          'none';
+      const transition = 'transform 0.08s linear, background 0.2s, box-shadow 0.2s';
 
       return (
-        <div className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
-          {/* Plumb line — rotates opposite to device tilt */}
+        <div className="absolute inset-0 z-25 pointer-events-none">
+          {/*
+           * Rotating line: anchored at horizontal centre, rotates by -gamma
+           * so it always points toward gravity regardless of phone tilt.
+           * left: calc(50% - 0.75px) centres the 1.5px-wide element.
+           * transformOrigin centre rotates around the mid-point of the line.
+           */}
           <div style={{
             position:        'absolute',
+            top:             0,
+            left:            'calc(50% - 0.75px)',
             width:           '1.5px',
             height:          '100%',
             background:      `linear-gradient(to bottom,
-              transparent 0%,
-              ${color.replace(')', ',0)')} 5%,
-              ${color} 20%,
-              ${color} 80%,
-              ${color.replace(')', ',0)')} 95%,
-              transparent 100%)`,
+              transparent 0%, ${color} 8%, ${color} 92%, transparent 100%)`,
             transform:       `rotate(${-gamma}deg)`,
             transformOrigin: 'center center',
-            transition:      'transform 0.08s linear, box-shadow 0.2s, background 0.2s',
+            transition,
             boxShadow:       glow,
-          }} />
+          }}>
+            {/* Plumb bob — lives inside the rotating element so it tracks the tip */}
+            <div style={{
+              position:     'absolute',
+              bottom:       '8%',
+              left:         '50%',
+              transform:    'translateX(-50%)',
+              width:        '10px',
+              height:       '10px',
+              borderRadius: '50%',
+              background:   color,
+              boxShadow:    glow,
+              transition,
+            }} />
+          </div>
 
-          {/* Plumb bob at bottom */}
-          <div style={{
-            position:        'absolute',
-            bottom:          '12%',
-            width:           '8px',
-            height:          '8px',
-            borderRadius:    '50%',
-            background:      color,
-            boxShadow:       glow,
-            transform:       `translateX(${Math.sin(-gamma * Math.PI / 180) * window.innerHeight * 0.38}px)`,
-            transition:      'transform 0.08s linear, background 0.2s, box-shadow 0.2s',
-          }} />
-
-          {/* Degree label — only when notably tilted */}
+          {/* Degree badge — centred at bottom, not rotated */}
           {abs > 1.5 && (
             <div style={{
-              position:   'absolute',
-              bottom:     '8%',
-              background: 'rgba(0,0,0,0.55)',
+              position:     'absolute',
+              bottom:       '4%',
+              left:         '50%',
+              transform:    'translateX(-50%)',
+              background:   'rgba(0,0,0,0.6)',
               borderRadius: '999px',
-              padding:    '2px 8px',
-              color:      color,
-              fontSize:   '11px',
-              fontFamily: 'monospace',
-              fontWeight: 'bold',
-              transform:  'translateX(0)',
+              padding:      '3px 10px',
+              color,
+              fontSize:     '12px',
+              fontFamily:   'monospace',
+              fontWeight:   'bold',
+              whiteSpace:   'nowrap',
             }}>
-              {gamma > 0 ? '←' : '→'} {abs.toFixed(1)}°
+              {gamma > 0 ? '← ' : '→ '}{abs.toFixed(1)}°
             </div>
           )}
         </div>
