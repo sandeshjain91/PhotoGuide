@@ -293,6 +293,23 @@
       async getUploadQueue(status) { const db = await openDB(); return idbIndexQuery(db, 'uploadQueue', 'status', status); },
       async updateUploadItem(item) { const db = await openDB(); return idbPut(db, 'uploadQueue', item); },
 
+      /* ── Photo helpers for cross-device sync ── */
+      async getPhotoById(id) {
+        const db = await openDB();
+        return new Promise((res, rej) => {
+          const req = db.transaction('photos', 'readonly').objectStore('photos').get(id);
+          req.onsuccess = () => res(req.result || null);
+          req.onerror   = () => rej(req.error);
+        });
+      },
+      /* Save photo metadata from Firebase (preserves local dataUrl if exists) */
+      async savePhotoMeta(photo) {
+        const db = await openDB();
+        const existing = await this.getPhotoById(photo.id);
+        if (existing && existing.dataUrl) return; // keep local blob
+        return idbPut(db, 'photos', { ...photo });
+      },
+
       /* ── Firebase Sync Queue ── */
       async addToFirebaseQueue(item) { const db = await openDB(); return idbAdd(db, 'firebaseSyncQueue', item); },
       async getFirebaseQueue(status) { const db = await openDB(); return idbIndexQuery(db, 'firebaseSyncQueue', 'status', status); },
@@ -619,6 +636,65 @@
     }
 
     /* ── 2g. Auto-enqueue Firebase sync on DB writes ─────────────── */
+
+    /*
+     * Pull all clinic data from Firestore into local IndexedDB.
+     * Called once after login so any device sees the full dataset.
+     * Safe to call again — it merges rather than overwrites local blobs.
+     */
+    async function syncFromFirebase(onProgress) {
+      const fb = await getFirebase();
+      if (!fb) return;
+      try {
+        onProgress?.('patients');
+        const patientsSnap = await fb.db.collection('patients').get();
+
+        for (const doc of patientsSnap.docs) {
+          const d = doc.data();
+          await DB.savePatient({
+            id: doc.id,
+            ...d,
+            createdAt: d.createdAt?.toMillis?.() || d.createdAt || Date.now(),
+          });
+        }
+
+        onProgress?.('procedures');
+        for (const doc of patientsSnap.docs) {
+          const procsSnap = await fb.db.collection('patients').doc(doc.id)
+            .collection('procedures').get();
+          for (const pDoc of procsSnap.docs) {
+            const d = pDoc.data();
+            await DB.saveProcedure({
+              id:        pDoc.id,
+              patientId: doc.id,
+              ...d,
+              date: d.date || '',
+            });
+          }
+        }
+
+        onProgress?.('photos');
+        for (const doc of patientsSnap.docs) {
+          const photosSnap = await fb.db.collection('patients').doc(doc.id)
+            .collection('photos').get();
+          for (const phDoc of photosSnap.docs) {
+            const d = phDoc.data();
+            const id = isNaN(phDoc.id) ? phDoc.id : Number(phDoc.id);
+            await DB.savePhotoMeta({
+              id,
+              patientId: doc.id,
+              ...d,
+              dataUrl:   null, // no local blob on remote device; display uses downloadUrl
+              timestamp: d.timestamp || Date.now(),
+            });
+          }
+        }
+        onProgress?.('done');
+      } catch (err) {
+        console.error('[Firebase] syncFromFirebase error:', err);
+        onProgress?.('done');
+      }
+    }
 
     async function enqueueFirebaseSync(action, payload, dataUrl) {
       /* Firebase always available (hardcoded config) */
@@ -1641,7 +1717,7 @@
                     onClick={() => onSelect(photo)}
                     className="relative rounded-xl overflow-hidden aspect-[3/4] border-2 border-white/15 active:border-amber-400 transition-colors"
                   >
-                    <img src={photo.dataUrl} alt="" className="w-full h-full object-cover" />
+                    <img src={photo.dataUrl || photo.downloadUrl} alt="" className="w-full h-full object-cover" />
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-2">
                       <p className="text-white/70 text-xs">{new Date(photo.timestamp).toLocaleDateString()}</p>
                     </div>
@@ -1946,16 +2022,22 @@
       useEffect(() => { loadPhotos(); }, [loadPhotos]);
 
       const downloadPhoto = (photo) => {
-        const a    = document.createElement('a');
-        a.href     = photo.dataUrl;
-        a.download = [
+        const src = photo.dataUrl || photo.downloadUrl;
+        if (!src) return;
+        const filename = [
           patient.name.replace(/\s+/g, '_'),
           procedure.name.replace(/\s+/g, '_'),
           photo.captureMode,
           photo.photoType,
           new Date(photo.timestamp).toISOString().split('T')[0],
         ].join('_') + '.jpg';
-        a.click();
+        if (photo.downloadUrl && !photo.dataUrl) {
+          /* Remote photo — open in new tab (cross-origin download restriction) */
+          window.open(photo.downloadUrl, '_blank');
+        } else {
+          const a = document.createElement('a');
+          a.href = src; a.download = filename; a.click();
+        }
       };
 
       const deletePhoto = async (id) => {
@@ -2089,7 +2171,7 @@
                         onClick={() => setViewPhoto(photo)}
                         className="relative aspect-[3/4] rounded-xl overflow-hidden border border-white/10 active:scale-95 transition-transform"
                       >
-                        <img src={photo.dataUrl} alt="" className="w-full h-full object-cover" />
+                        <img src={photo.dataUrl || photo.downloadUrl} alt="" className="w-full h-full object-cover" />
                         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 py-1.5">
                           <div className="flex items-end justify-between">
                             <span className="text-white text-[10px] font-bold leading-none">
@@ -2770,7 +2852,7 @@
     }
 
     /* ── 14. App ───────────────────────────────────────────────────── */
-    function App() {
+    function App({ refreshRef }) {
       const [view,              setView]              = useState('patients');
       const [patients,          setPatients]          = useState([]);
       const [activePatient,     setActivePatient]     = useState(null);
@@ -2789,13 +2871,43 @@
       const [installPrompt,  setInstallPrompt]  = useState(null);
       const [showInstall,    setShowInstall]     = useState(false);
 
-      /* ── Load patients ── */
+      /* ── Load patients from IndexedDB ── */
       const loadPatients = useCallback(async () => {
         const list = await DB.getPatients();
         setPatients(list.sort((a, b) => a.name.localeCompare(b.name)));
       }, []);
 
       useEffect(() => { loadPatients(); }, [loadPatients]);
+
+      /* ── Expose loadPatients to AppContainer (called after initial sync) ── */
+      useEffect(() => {
+        if (refreshRef) refreshRef.current = loadPatients;
+      }, [refreshRef, loadPatients]);
+
+      /* ── Real-time Firestore → IndexedDB → UI listener ── */
+      useEffect(() => {
+        let unsub = null;
+        (async () => {
+          const fb = await getFirebase();
+          if (!fb) return;
+          unsub = fb.db.collection('patients').onSnapshot(async (snap) => {
+            for (const change of snap.docChanges()) {
+              if (change.type === 'added' || change.type === 'modified') {
+                const d = change.doc.data();
+                await DB.savePatient({
+                  id: change.doc.id, ...d,
+                  createdAt: d.createdAt?.toMillis?.() || d.createdAt || Date.now(),
+                });
+              } else if (change.type === 'removed') {
+                /* patient deleted elsewhere — remove locally */
+                try { await DB.deletePatient(change.doc.id); } catch (_) {}
+              }
+            }
+            loadPatients();
+          }, () => { /* ignore snapshot errors (offline) */ });
+        })();
+        return () => unsub?.();
+      }, [loadPatients]);
 
       /* ── Service worker registration ── */
       useEffect(() => {
@@ -2855,7 +2967,7 @@
       };
 
       const handleGhostChosen = (photo) => {
-        setGhostImageUrl(photo.dataUrl);
+        setGhostImageUrl(photo.dataUrl || photo.downloadUrl);
         setShowGhostSel(false);
         setView('camera');
       };
@@ -3066,15 +3178,16 @@
       const [user,        setUser]        = useState(null);
       const [userStatus,  setUserStatus]  = useState(null); // 'approved'|'pending'|'rejected'|null
       const [authLoading, setAuthLoading] = useState(true);
+      const [syncStep,    setSyncStep]    = useState('');  // '' | 'patients' | 'procedures' | 'photos' | 'done'
+      const refreshRef = useRef(null); // callback set by <App> to reload its patients list
 
       const checkUserStatus = async (firebaseUser) => {
         if (!firebaseUser) { setUser(null); setUserStatus(null); setAuthLoading(false); return; }
         try {
           const fb = await getFirebase();
-          if (!fb) { /* Offline — let approved users in by caching status */ setUser(firebaseUser); setUserStatus('approved'); setAuthLoading(false); return; }
+          if (!fb) { setUser(firebaseUser); setUserStatus('approved'); setAuthLoading(false); return; }
           const doc = await fb.db.collection('users').doc(firebaseUser.uid).get();
           if (!doc.exists) {
-            /* User registered before this system — auto-approve admin, pending others */
             const isAdmin = firebaseUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
             const status  = isAdmin ? 'approved' : 'pending';
             await fb.db.collection('users').doc(firebaseUser.uid).set({
@@ -3088,12 +3201,21 @@
           setUser(firebaseUser);
         } catch (err) {
           console.error('Status check error:', err);
-          /* On error (offline), allow in so app remains usable */
           setUser(firebaseUser);
           setUserStatus('approved');
         }
         setAuthLoading(false);
       };
+
+      /* Pull Firestore → IndexedDB on login, then trigger App refresh */
+      useEffect(() => {
+        if (userStatus !== 'approved' || !user) return;
+        setSyncStep('patients');
+        syncFromFirebase((step) => {
+          setSyncStep(step);
+          if (step === 'done') refreshRef.current?.();
+        });
+      }, [userStatus, user?.uid]);
 
       useEffect(() => {
         (async () => {
@@ -3108,12 +3230,16 @@
         })();
       }, []);
 
-      if (authLoading) {
+      const syncLabel = { patients: 'patients', procedures: 'visits', photos: 'photos', done: '' }[syncStep] || '';
+
+      if (authLoading || (userStatus === 'approved' && syncStep && syncStep !== 'done')) {
         return (
           <div className="h-full flex items-center justify-center bg-slate-900">
             <div className="text-center space-y-3">
-              <div className="w-10 h-10 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-white/40 text-sm">Loading PhotoGuide…</p>
+              <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-white/40 text-sm">
+                {authLoading ? 'Loading PhotoGuide…' : `Syncing ${syncLabel}…`}
+              </p>
             </div>
           </div>
         );
@@ -3159,7 +3285,7 @@
         );
       }
 
-      return <App />;
+      return <App refreshRef={refreshRef} />;
     }
 
     /* ── Mount ─────────────────────────────────────────────────────── */
