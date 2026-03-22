@@ -3115,15 +3115,22 @@
               reject(new Error('Google Identity Services not loaded. Check your internet connection.'));
               return;
             }
+            let resolved = false;
+            const timeoutId = setTimeout(() => {
+              if (!resolved) reject(new Error('Sign-in timed out. Check your OAuth Client ID and try again.'));
+            }, 15000);
+
             const client = google.accounts.oauth2.initTokenClient({
               client_id: clientId.trim(),
               scope: 'https://www.googleapis.com/auth/drive.file',
               callback: (resp) => {
+                clearTimeout(timeoutId);
+                resolved = true;
                 if (resp.error) reject(new Error(resp.error_description || resp.error));
                 else resolve(resp.access_token);
               },
             });
-            client.requestAccessToken();
+            client.requestAccessToken({ prompt: 'consent' });
           });
 
           /* Get user email */
