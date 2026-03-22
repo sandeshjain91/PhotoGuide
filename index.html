@@ -3105,74 +3105,74 @@
         await DB.setSetting('googleClientId', clientId.trim());
       };
 
-      const handleSignIn = async () => {
-        if (!clientId.trim()) { alert('Please enter a Google Client ID first.'); return; }
-        await saveClientId();
-        setSigningIn(true);
-        try {
-          const id = clientId.trim();
-          console.log('[OAuth] Initiating sign-in with Client ID:', id.slice(0, 20) + '...');
-
-          if (!window.google?.accounts?.oauth2) {
-            throw new Error('Google Identity Services not loaded. Refresh the page and try again.');
-          }
-
-          const token = await new Promise((resolve, reject) => {
-            let resolved = false;
-            const timeoutId = setTimeout(() => {
-              if (!resolved) {
-                console.error('[OAuth] Callback timeout — popup may have been blocked or cancelled');
-                reject(new Error(
-                  'Sign-in popup did not respond.\n\n' +
-                  'Possible causes:\n' +
-                  '• Popup was blocked by browser\n' +
-                  '• You closed the popup without completing sign-in\n' +
-                  '• Invalid or mismatched OAuth Client ID\n' +
-                  '• Client ID not authorized for this domain\n\n' +
-                  'Verify your Client ID is correct and try again.'
-                ));
-              }
-            }, 20000);
-
-            try {
-              const client = google.accounts.oauth2.initTokenClient({
-                client_id: id,
-                scope: 'https://www.googleapis.com/auth/drive.file',
-                callback: (resp) => {
-                  clearTimeout(timeoutId);
-                  resolved = true;
-                  console.log('[OAuth] Callback received:', resp.error ? 'ERROR' : 'SUCCESS');
-                  if (resp.error) {
-                    console.error('[OAuth] Error:', resp.error, resp.error_description);
-                    reject(new Error(resp.error_description || resp.error));
-                  } else {
-                    resolve(resp.access_token);
-                  }
-                },
-              });
-              console.log('[OAuth] Client initialized, requesting token...');
-              client.requestAccessToken({ prompt: 'consent' });
-            } catch (e) {
-              clearTimeout(timeoutId);
-              console.error('[OAuth] Failed to init client:', e);
-              reject(e);
-            }
-          });
-
-          /* Get user email */
-          const info = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const user = await info.json();
-
-          await DB.setSetting('driveEnabled', true);
-          await DB.setSetting('driveEmail', user.email || 'Connected');
-          setDriveEnabled(true);
-          setDriveEmail(user.email || 'Connected');
-        } catch (err) {
-          alert('Sign-in failed: ' + err.message);
+      const handleSignIn = () => {
+        const id = clientId.trim();
+        if (!id) { alert('Please enter a Google Client ID first.'); return; }
+        if (!window.google?.accounts?.oauth2) {
+          alert('Google Identity Services not loaded yet. Wait a moment and try again.');
+          return;
         }
-        setSigningIn(false);
+
+        /* Save Client ID in background — do NOT await before requestAccessToken
+           because any await before the popup call breaks the browser user-gesture
+           check and the popup gets silently blocked.                               */
+        saveClientId();
+        setSigningIn(true);
+
+        let resolved = false;
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            setSigningIn(false);
+            alert(
+              'The sign-in popup did not appear or was closed.\n\n' +
+              'Please check:\n' +
+              '• Your browser blocked the popup — look for a blocked-popup icon in the address bar and allow it, then try again\n' +
+              '• The Client ID is for a "Web application" type (not Desktop)\n' +
+              '• Your domain is added under "Authorized JavaScript origins" in Google Cloud Console'
+            );
+          }
+        }, 20000);
+
+        try {
+          const client = google.accounts.oauth2.initTokenClient({
+            client_id: id,
+            scope: 'https://www.googleapis.com/auth/drive.file',
+            error_callback: (err) => {
+              if (resolved) return;
+              clearTimeout(timeoutId); resolved = true;
+              setSigningIn(false);
+              alert('Sign-in failed: ' + (err?.message || err?.type || 'Unknown error'));
+            },
+            callback: async (resp) => {
+              if (resolved) return;
+              clearTimeout(timeoutId); resolved = true;
+              if (resp.error) {
+                setSigningIn(false);
+                alert('Sign-in failed: ' + (resp.error_description || resp.error));
+                return;
+              }
+              try {
+                const info = await fetch('https://www.googleapis.com/oauth2/v1/userinfo', {
+                  headers: { Authorization: `Bearer ${resp.access_token}` },
+                });
+                const user = await info.json();
+                await DB.setSetting('driveEnabled', true);
+                await DB.setSetting('driveEmail', user.email || 'Connected');
+                setDriveEnabled(true);
+                setDriveEmail(user.email || 'Connected');
+              } catch (err) {
+                alert('Sign-in failed: ' + err.message);
+              }
+              setSigningIn(false);
+            },
+          });
+          client.requestAccessToken({ prompt: 'consent' });
+        } catch (e) {
+          clearTimeout(timeoutId); resolved = true;
+          setSigningIn(false);
+          alert('Sign-in failed: ' + e.message);
+        }
       };
 
       const handleSignOut = async () => {
