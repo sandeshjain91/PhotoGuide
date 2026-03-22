@@ -927,44 +927,32 @@
         window._syncState.drive.pending = pending.length;
         if (pending.length === 0) { _uploadRunning = false; window._syncState.drive.running = false; return; }
 
-        /* Get access token — silent first (no popup). If not yet authorized, skip silently. */
-        let token;
-        try {
-          token = await getDriveToken();
-        } catch (_) {
-          /* Not yet authorized — will retry when user grants access */
-          _uploadRunning = false; window._syncState.drive.running = false; return;
-        }
+        /* Use cached token only — never call requestAccessToken in background (can hang).
+           User must re-authorize via banner/settings if token is expired. */
+        const token = (_driveToken && Date.now() < _driveTokenExpiry) ? _driveToken : null;
+        if (!token) { _uploadRunning = false; window._syncState.drive.running = false; return; }
 
         for (const item of pending) {
           try {
+            if (!item.dataUrl) {
+              console.warn('[Drive] Skipping item with no dataUrl:', item.id);
+              item.status = 'error';
+              await DB.updateUploadItem(item);
+              continue;
+            }
             item.status = 'uploading';
             await DB.updateUploadItem(item);
 
-            /* Retry once with a fresh token on 401 (expired) */
-            let folderId, uploadDone = false;
-            for (let attempt = 0; attempt < 2; attempt++) {
-              try {
-                folderId = await DriveAPI.ensureFolderHierarchy(
-                  item.patientName, item.procedureName || 'General', token
-                );
-                const resp = await fetch(item.dataUrl);
-                const blob = await resp.blob();
-                await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
-                uploadDone = true;
-                break;
-              } catch (e) {
-                if (attempt === 0 && (e.message?.includes('401') || e.message?.includes('Invalid Credentials'))) {
-                  console.warn('[Drive] Token expired, refreshing…');
-                  token = await getDriveToken(true);
-                } else throw e;
-              }
-            }
-
-            item.status = uploadDone ? 'done' : 'error';
+            const folderId = await DriveAPI.ensureFolderHierarchy(
+              item.patientName, item.procedureName || 'General', token
+            );
+            const resp = await fetch(item.dataUrl);
+            const blob = await resp.blob();
+            await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
+            item.status = 'done';
             await DB.updateUploadItem(item);
           } catch (err) {
-            console.error('Drive upload error:', err);
+            console.error('[Drive] Upload error for', item.filename, ':', err.message);
             item.retries = (item.retries || 0) + 1;
             item.status = item.retries >= 3 ? 'error' : 'pending';
             await DB.updateUploadItem(item);
@@ -3064,7 +3052,29 @@
         if (!window.google?.accounts?.oauth2) return;
         setAuthorizingDrive(true);
         authorizeDrive()
-          .then(() => { processUploadQueue(); })
+          .then(async () => {
+            /* Enqueue all existing photos that aren't already queued */
+            const existingPending   = await DB.getUploadQueue('pending');
+            const existingUploading = await DB.getUploadQueue('uploading');
+            const alreadyQueued = new Set([...existingPending, ...existingUploading].map(i => i.photoId).filter(Boolean));
+            for (const pat of patients) {
+              const procs = await DB.getProceduresByPatient(pat.id);
+              for (const proc of procs) {
+                const photos = await DB.getPhotosByProcedure(proc.id);
+                for (const ph of photos) {
+                  if (!ph.dataUrl || alreadyQueued.has(ph.id)) continue;
+                  await DB.addToUploadQueue({
+                    photoId: ph.id, patientName: pat.name,
+                    procedureName: proc.name || proc.category || 'Visit',
+                    filename: ph.filename || `${ph.captureMode || 'photo'}_${ph.id}.jpg`,
+                    dataUrl: ph.dataUrl, status: 'pending', retries: 0, createdAt: Date.now(),
+                  });
+                }
+              }
+            }
+            processUploadQueue();
+            showToast('Google Drive authorized — uploading photos', 'success', 3000);
+          })
           .catch(e => { console.error('[Drive] Authorization failed:', e); showToast('Drive authorization failed', 'error'); })
           .finally(() => setAuthorizingDrive(false));
       };
