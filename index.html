@@ -134,6 +134,30 @@
       dental: { min: 22,  max: 45,  label: '22–45 cm'  },
     };
 
+    /*
+     * Lazy-load TF.js + BlazeFace from local bundles (fallback for iOS/Safari
+     * where the native FaceDetector API is unavailable).
+     * Returns a Promise that resolves to the loaded BlazeFace model.
+     */
+    let _blazePromise = null;
+    function loadBlazeFace() {
+      if (_blazePromise) return _blazePromise;
+      _blazePromise = (async () => {
+        const inject = (src) => new Promise((res, rej) => {
+          if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+          const s = document.createElement('script');
+          s.src = src;
+          s.onload = res;
+          s.onerror = () => rej(new Error(`Failed to load ${src}`));
+          document.head.appendChild(s);
+        });
+        await inject('lib/tf.min.js');
+        await inject('lib/blazeface.min.js');
+        return await window.blazeface.load();
+      })();
+      return _blazePromise;
+    }
+
     /* ── 2. IndexedDB layer ────────────────────────────────────────── */
 
     const DB_NAME    = 'PhotoGuide_v2';
@@ -695,21 +719,48 @@
       const range     = DISTANCE_RANGES[category] || DISTANCE_RANGES.face;
       const isFace    = category === 'face';
 
-      /* ── Init FaceDetector ── */
+      /* ── Init face detection (native FaceDetector → BlazeFace fallback) ── */
+      const backendRef = useRef(null); // 'native' | 'blaze'
+      const blazeRef   = useRef(null); // BlazeFace model (if used)
+
       useEffect(() => {
         runningRef.current = true;
-        if (isFace && 'FaceDetector' in window) {
+        if (!isFace) return;
+
+        if ('FaceDetector' in window) {
           try {
             detectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+            backendRef.current = 'native';
             setHasFD(true);
             detectLoop();
-          } catch (_) {}
+          } catch (_) {
+            // native failed, try BlazeFace
+            initBlazeFace();
+          }
+        } else {
+          initBlazeFace();
         }
+
         return () => {
           runningRef.current = false;
           clearTimeout(timerRef.current);
+          if (blazeRef.current?.dispose) blazeRef.current.dispose();
         };
       }, []); // eslint-disable-line
+
+      const initBlazeFace = () => {
+        loadBlazeFace()
+          .then((model) => {
+            if (!runningRef.current) return;
+            blazeRef.current = model;
+            backendRef.current = 'blaze';
+            setHasFD(true);
+            detectLoop();
+          })
+          .catch((err) => {
+            console.warn('[ReadinessHUD] BlazeFace load failed:', err.message);
+          });
+      };
 
       const detectLoop = async () => {
         if (!runningRef.current) return;
@@ -719,18 +770,37 @@
           return;
         }
         try {
-          const faces = await detectorRef.current.detect(video);
-          if (!runningRef.current) return;
-          if (faces.length > 0) {
-            const bb     = faces[0].boundingBox;
-            const vW     = video.offsetWidth  || video.videoWidth  || 1;
-            const vH     = video.offsetHeight || video.videoHeight || 1;
-            const cx     = (bb.x + bb.width / 2) / vW;   // 0-1, 0.5 = centred
-            const cy     = (bb.y + bb.height / 2) / vH;
-            const frac   = bb.width / vW;
-            setFaceData({ centerX: cx, centerY: cy, distance: Math.round(FOCAL_K / frac) });
-          } else {
-            setFaceData(null);
+          if (backendRef.current === 'native') {
+            /* ── Native FaceDetector (Chrome/Android) ── */
+            const faces = await detectorRef.current.detect(video);
+            if (!runningRef.current) return;
+            if (faces.length > 0) {
+              const bb   = faces[0].boundingBox;
+              const vW   = video.offsetWidth  || video.videoWidth  || 1;
+              const vH   = video.offsetHeight || video.videoHeight || 1;
+              const cx   = (bb.x + bb.width / 2) / vW;
+              const cy   = (bb.y + bb.height / 2) / vH;
+              const frac = bb.width / vW;
+              setFaceData({ centerX: cx, centerY: cy, distance: Math.round(FOCAL_K / frac) });
+            } else {
+              setFaceData(null);
+            }
+          } else if (backendRef.current === 'blaze') {
+            /* ── BlazeFace fallback (iOS/Safari) ── */
+            const preds = await blazeRef.current.estimateFaces(video, false);
+            if (!runningRef.current) return;
+            if (preds.length > 0) {
+              const [x1, y1] = preds[0].topLeft;
+              const [x2, y2] = preds[0].bottomRight;
+              const vW   = video.videoWidth  || 1;
+              const vH   = video.videoHeight || 1;
+              const cx   = ((x1 + x2) / 2) / vW;
+              const cy   = ((y1 + y2) / 2) / vH;
+              const frac = (x2 - x1) / vW;
+              setFaceData({ centerX: cx, centerY: cy, distance: Math.round(FOCAL_K / frac) });
+            } else {
+              setFaceData(null);
+            }
           }
         } catch (_) {}
         timerRef.current = setTimeout(detectLoop, 350);
