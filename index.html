@@ -821,6 +821,7 @@
     function _notifyDriveAuth(authorized) {
       window._driveAuthorized = authorized;
       _driveAuthListeners.forEach(fn => fn(authorized));
+      if (authorized) DB.setSetting('driveWasAuthorized', true).catch(() => {});
     }
 
     /* prompt: '' = silent (no popup). prompt: 'consent' = explicit popup (needs user gesture). */
@@ -828,10 +829,13 @@
       if (!forceRefresh && _driveToken && Date.now() < _driveTokenExpiry) return _driveToken;
       if (!window.google?.accounts?.oauth2) throw new Error('GIS not loaded');
       return new Promise((resolve, reject) => {
+        /* Add 15s timeout so we never hang indefinitely */
+        const tid = setTimeout(() => reject(new Error('GIS token request timed out')), 15000);
         const client = google.accounts.oauth2.initTokenClient({
           client_id: DRIVE_CLIENT_ID,
           scope: 'https://www.googleapis.com/auth/drive.file',
           callback: (resp) => {
+            clearTimeout(tid);
             if (resp.error) { _notifyDriveAuth(false); reject(new Error(resp.error)); }
             else {
               _driveToken = resp.access_token;
@@ -848,6 +852,26 @@
     /* Called from UI (user gesture) to explicitly authorize Drive */
     function authorizeDrive() {
       return getDriveToken(true, 'consent');
+    }
+
+    /* Called on app startup — silently re-auth if user previously authorized.
+       Waits up to 8s for GIS script to load, then attempts silent token. */
+    async function tryDriveSilentAuth() {
+      const wasAuthorized = await DB.getSetting('driveWasAuthorized');
+      if (!wasAuthorized) return; /* never authorized — show banner */
+      /* Wait for GIS to load */
+      for (let i = 0; i < 16; i++) {
+        if (window.google?.accounts?.oauth2) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      if (!window.google?.accounts?.oauth2) return;
+      try {
+        await getDriveToken(false, ''); /* silent — no popup */
+        processUploadQueue();           /* resume any pending uploads */
+      } catch (_) {
+        /* Silent auth failed (session expired) — banner will show */
+        console.log('[Drive] Silent re-auth failed — user will need to re-authorize');
+      }
     }
 
     const DriveAPI = {
@@ -4265,8 +4289,8 @@
         });
       }, [userStatus, user?.uid]);
 
-      /* Auto-resume Drive uploads on app start (silently skips if not yet authorized) */
-      useEffect(() => { processUploadQueue(); }, []);
+      /* Auto-resume Drive: silently re-auth if previously authorized, then upload */
+      useEffect(() => { tryDriveSilentAuth(); }, []);
 
       /* Load saved theme on mount (default: clean-bright) */
       useEffect(() => {
