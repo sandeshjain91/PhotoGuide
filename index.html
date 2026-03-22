@@ -37,7 +37,7 @@
     *, *::before, *::after { box-sizing: border-box; }
     html, body, #root { height: 100%; margin: 0; padding: 0; }
     body {
-      background: #0f172a;
+      background: #080d1a;
       color: white;
       overscroll-behavior: none;
       -webkit-tap-highlight-color: transparent;
@@ -120,6 +120,79 @@
     /* ── Scrollbar hide ─────────────────────────── */
     .no-scroll::-webkit-scrollbar { display: none; }
     .no-scroll { scrollbar-width: none; }
+
+    /* ── Design system additions ─────────────────── */
+
+    /* Gradient primary button */
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      box-shadow: 0 4px 20px rgba(99,102,241,0.30);
+    }
+    .btn-primary:active { transform: scale(0.97); opacity: 0.9; }
+
+    /* Ghost secondary button */
+    .btn-secondary {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.11);
+    }
+    .btn-secondary:active { transform: scale(0.97); }
+
+    /* Glass card */
+    .glass-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    /* Bottom-sheet drag handle */
+    .drag-handle {
+      width: 2.25rem;
+      height: 0.25rem;
+      background: rgba(255,255,255,0.18);
+      border-radius: 9999px;
+      margin: 0 auto 1.25rem;
+    }
+
+    /* Slide-up modal */
+    @keyframes slide-up {
+      from { transform: translateY(100%); opacity: 0.6; }
+      to   { transform: translateY(0);    opacity: 1;   }
+    }
+    .slide-up { animation: slide-up 0.32s cubic-bezier(0.32, 0.72, 0, 1) both; }
+
+    /* Fade-in-up for list items */
+    @keyframes fade-in-up {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in-up { animation: fade-in-up 0.25s ease-out both; }
+
+    /* Form input — focus glow */
+    .field-input:focus {
+      outline: none;
+      border-color: rgba(99,102,241,0.7) !important;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+
+    /* Section label */
+    .section-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.35);
+    }
+
+    /* Chevron icon */
+    .chevron-right::after {
+      content: '';
+      display: inline-block;
+      width: 6px; height: 10px;
+      border-top: 1.5px solid rgba(255,255,255,0.2);
+      border-right: 1.5px solid rgba(255,255,255,0.2);
+      transform: rotate(45deg) translate(-2px, 1px);
+    }
   </style>
 </head>
 
@@ -1768,14 +1841,14 @@
 
             {/* ── Camera error ── */}
             {error && (
-              <div className="absolute inset-0 z-40 bg-black/85 flex items-center justify-center p-6">
-                <div className="bg-slate-800 rounded-2xl p-6 text-center max-w-xs">
+              <div className="absolute inset-0 z-40 flex items-center justify-center p-6"
+                style={{background:'rgba(8,13,26,0.9)', backdropFilter:'blur(10px)'}}>
+                <div className="rounded-2xl p-6 text-center max-w-xs w-full"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}>
                   <div className="text-4xl mb-3">📷</div>
                   <p className="text-white text-sm mb-5 leading-relaxed">{error}</p>
-                  <button
-                    onClick={startCamera}
-                    className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold"
-                  >
+                  <button onClick={startCamera}
+                    className="w-full py-3 rounded-xl text-white font-semibold btn-primary">
                     Retry
                   </button>
                 </div>
@@ -1850,33 +1923,37 @@
       );
 
       return (
-        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col">
-          <div className="pt-safe px-5 pb-4 bg-slate-800 border-b border-white/10">
-            <h2 className="text-white text-xl font-bold">Select Ghost Reference</h2>
-            <p className="text-white/45 text-sm mt-1">
-              Pick a PRE photo to overlay on the live feed for alignment.
+        <div className="fixed inset-0 z-50 flex flex-col" style={{background:'#080d1a'}}>
+          <div className="pt-safe px-5 pb-4"
+            style={{background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
+            <h2 className="text-white text-[18px] font-bold">Ghost Reference</h2>
+            <p className="text-white/40 text-sm mt-1">
+              Select a PRE photo to overlay for alignment guidance
             </p>
           </div>
 
           <div className="flex-1 overflow-y-auto no-scroll p-4">
             {candidates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
-                <span className="text-5xl">👻</span>
-                <p className="text-white/50 text-sm">
-                  No pre-treatment {CAPTURE_MODES[captureMode]?.label} photos found.
+              <div className="flex flex-col items-center justify-center h-48 text-center gap-4">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl"
+                  style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                  👻
+                </div>
+                <p className="text-white/40 text-sm">
+                  No PRE photos for {CAPTURE_MODES[captureMode]?.label} yet
                 </p>
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 {candidates.map(photo => (
-                  <button
-                    key={photo.id}
-                    onClick={() => onSelect(photo)}
-                    className="relative rounded-xl overflow-hidden aspect-[3/4] border-2 border-white/15 active:border-amber-400 transition-colors"
-                  >
+                  <button key={photo.id} onClick={() => onSelect(photo)}
+                    className="relative rounded-2xl overflow-hidden aspect-[3/4] active:scale-95 transition-transform"
+                    style={{border:'2px solid rgba(255,255,255,0.1)'}}>
                     <img src={photo.dataUrl || photo.downloadUrl} alt="" className="w-full h-full object-cover" />
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-2">
-                      <p className="text-white/70 text-xs">{new Date(photo.timestamp).toLocaleDateString()}</p>
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
+                      <p className="text-white/65 text-xs">
+                        {new Date(photo.timestamp).toLocaleDateString()}
+                      </p>
                     </div>
                   </button>
                 ))}
@@ -1884,11 +1961,9 @@
             )}
           </div>
 
-          <div className="px-4 pb-safe pt-3 bg-slate-800 border-t border-white/10">
-            <button
-              onClick={onSkip}
-              className="w-full py-4 bg-white/10 rounded-xl text-white font-bold text-base active:scale-98"
-            >
+          <div className="px-4 pb-safe pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.07)'}}>
+            <button onClick={onSkip}
+              className="w-full py-4 rounded-xl text-white/70 font-semibold text-[15px] active:scale-[0.98] transition-transform btn-secondary">
               Continue Without Ghost
             </button>
           </div>
@@ -1916,57 +1991,67 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70">
-          <div className="bg-slate-800 w-full rounded-t-3xl px-5 pt-6 pb-10">
+        <div className="fixed inset-0 z-50 flex items-end"
+          style={{background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)'}}>
+          <div className="w-full rounded-t-3xl px-5 pt-4 pb-safe slide-up"
+            style={{background:'#0f1728', border:'1px solid rgba(255,255,255,0.1)', borderBottom:'none'}}>
+            {/* Drag handle */}
+            <div className="drag-handle" />
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-white text-xl font-bold">New Patient</h2>
-              <button onClick={onClose} className="text-white/40 text-2xl leading-none">✕</button>
+              <h2 className="text-white text-[18px] font-bold">New Patient</h2>
+              <button onClick={onClose}
+                className="w-8 h-8 rounded-xl flex items-center justify-center active:opacity-70"
+                style={{background:'rgba(255,255,255,0.08)'}}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M1 1l10 10M11 1L1 11" stroke="rgba(255,255,255,0.6)" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              </button>
             </div>
-            <form onSubmit={submit} className="space-y-4">
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Full Name *</span>
-                <input
-                  type="text" required autoFocus value={name}
+            <form onSubmit={submit} className="space-y-3.5">
+              <div>
+                <label className="section-label block mb-1.5">Full Name *</label>
+                <input type="text" required autoFocus value={name}
                   onChange={e => setName(e.target.value)}
-                  placeholder="Patient name"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/40 text-base focus:outline-none focus:border-blue-500"
+                  placeholder="Patient full name"
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-[15px]"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-              </label>
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Patient / Chart ID</span>
-                <input
-                  type="text" value={patientId}
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Patient / Chart ID</label>
+                <input type="text" value={patientId}
                   onChange={e => setPatientId(e.target.value)}
                   placeholder="Auto-generated if blank"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/40 text-base focus:outline-none focus:border-blue-500"
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-[15px]"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-              </label>
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Date of Birth</span>
-                <input
-                  type="date" value={dob}
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Date of Birth</label>
+                <input type="date" value={dob}
                   onChange={e => setDob(e.target.value)}
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white text-base focus:outline-none focus:border-blue-500"
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white text-[15px]"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-              </label>
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Clinical Notes</span>
-                <textarea
-                  rows={2} value={notes}
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Clinical Notes</label>
+                <textarea rows={2} value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Procedure notes, diagnosis…"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-base resize-none focus:outline-none focus:border-blue-500"
+                  className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-[15px] resize-none"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-              </label>
-              <div className="flex gap-3 pt-1">
-                <button
-                  type="button" onClick={onClose}
-                  className="flex-1 py-4 bg-white/10 rounded-xl text-white font-bold text-base active:scale-98"
-                >Cancel</button>
-                <button
-                  type="submit"
-                  className="flex-1 py-4 bg-blue-600 rounded-xl text-white font-bold text-base active:scale-98"
-                >Add Patient</button>
+              </div>
+              <div className="flex gap-3 pt-1 pb-2">
+                <button type="button" onClick={onClose}
+                  className="flex-1 py-4 rounded-xl text-white/70 font-semibold text-[15px] active:scale-[0.98] transition-transform btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit"
+                  className="flex-1 py-4 rounded-xl text-white font-semibold text-[15px] active:scale-[0.98] transition-transform btn-primary">
+                  Add Patient
+                </button>
               </div>
             </form>
           </div>
@@ -1995,59 +2080,83 @@
         });
       };
 
+      const CATEGORY_CONFIG = {
+        dental: { label: 'Dental', color: '#f43f5e', bg: 'rgba(244,63,94,0.15)', border: 'rgba(244,63,94,0.4)' },
+        face:   { label: 'Face',   color: '#a5b4fc', bg: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)' },
+        both:   { label: 'Both',   color: '#d8b4fe', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.4)' },
+      };
+
       return (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/70">
-          <div className="bg-slate-800 w-full rounded-t-3xl px-5 pt-6 pb-10">
+        <div className="fixed inset-0 z-50 flex items-end"
+          style={{background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)'}}>
+          <div className="w-full rounded-t-3xl px-5 pt-4 pb-safe slide-up"
+            style={{background:'#0f1728', border:'1px solid rgba(255,255,255,0.1)', borderBottom:'none'}}>
+            {/* Drag handle */}
+            <div className="drag-handle" />
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-white text-xl font-bold">New Procedure</h2>
-              <button onClick={onClose} className="text-white/40 text-2xl leading-none">✕</button>
+              <h2 className="text-white text-[18px] font-bold">New Procedure</h2>
+              <button onClick={onClose}
+                className="w-8 h-8 rounded-xl flex items-center justify-center active:opacity-70"
+                style={{background:'rgba(255,255,255,0.08)'}}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M1 1l10 10M11 1L1 11" stroke="rgba(255,255,255,0.6)" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              </button>
             </div>
-            <form onSubmit={submit} className="space-y-4">
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Procedure Name *</span>
-                <input
-                  type="text" required autoFocus value={name}
+            <form onSubmit={submit} className="space-y-3.5">
+              <div>
+                <label className="section-label block mb-1.5">Procedure Name *</label>
+                <input type="text" required autoFocus value={name}
                   onChange={e => setName(e.target.value)}
                   placeholder="e.g. Crown Fitting, Teeth Whitening"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white placeholder-white/40 text-base focus:outline-none focus:border-blue-500"
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white placeholder-white/25 text-[15px]"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-              </label>
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Date</span>
-                <input
-                  type="date" value={date}
-                  onChange={e => setDate(e.target.value)}
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3.5 text-white text-base focus:outline-none focus:border-blue-500"
-                />
-              </label>
+              </div>
               <div>
-                <span className="text-white/50 text-sm block mb-1">Category</span>
+                <label className="section-label block mb-1.5">Date</label>
+                <input type="date" value={date}
+                  onChange={e => setDate(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white text-[15px]"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
+                />
+              </div>
+              <div>
+                <label className="section-label block mb-2">Category</label>
                 <div className="flex gap-2">
-                  {['dental', 'face', 'both'].map(c => (
-                    <button key={c} type="button" onClick={() => setCategory(c)}
-                      className={`flex-1 py-3 rounded-xl text-sm font-bold transition-colors ${
-                        category === c ? 'bg-blue-600 text-white' : 'bg-white/8 text-white/50'
-                      }`}
-                    >{c === 'both' ? 'Both' : c.charAt(0).toUpperCase() + c.slice(1)}</button>
-                  ))}
+                  {(['dental', 'face', 'both']).map(c => {
+                    const cfg = CATEGORY_CONFIG[c];
+                    const active = category === c;
+                    return (
+                      <button key={c} type="button" onClick={() => setCategory(c)}
+                        className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95"
+                        style={active
+                          ? {background:cfg.bg, border:`1px solid ${cfg.border}`, color:cfg.color}
+                          : {background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.09)', color:'rgba(255,255,255,0.4)'}}>
+                        {cfg.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Notes</span>
-                <textarea
-                  rows={2} value={notes}
+              <div>
+                <label className="section-label block mb-1.5">Notes</label>
+                <textarea rows={2} value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="Additional notes…"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-base resize-none focus:outline-none focus:border-blue-500"
+                  className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-[15px] resize-none"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-              </label>
-              <div className="flex gap-3 pt-1">
+              </div>
+              <div className="flex gap-3 pt-1 pb-2">
                 <button type="button" onClick={onClose}
-                  className="flex-1 py-4 bg-white/10 rounded-xl text-white font-bold text-base active:scale-98"
-                >Cancel</button>
+                  className="flex-1 py-4 rounded-xl text-white/70 font-semibold text-[15px] active:scale-[0.98] transition-transform btn-secondary">
+                  Cancel
+                </button>
                 <button type="submit"
-                  className="flex-1 py-4 bg-blue-600 rounded-xl text-white font-bold text-base active:scale-98"
-                >Add Procedure</button>
+                  className="flex-1 py-4 rounded-xl text-white font-semibold text-[15px] active:scale-[0.98] transition-transform btn-primary">
+                  Add Procedure
+                </button>
               </div>
             </form>
           </div>
@@ -2088,69 +2197,117 @@
         load();
       };
 
+      const PROC_CATEGORY_STYLE = {
+        dental: { bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)', text: '#fb7185', accent: '#fb7185' },
+        face:   { bg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.3)', text: '#a5b4fc', accent: '#a5b4fc' },
+        both:   { bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', text: '#d8b4fe', accent: '#d8b4fe' },
+      };
+
+      /* Patient avatar gradient (same palette as list) */
+      const AVATAR_GRAD2 = [
+        ['#6366f1','#8b5cf6'], ['#0ea5e9','#6366f1'], ['#10b981','#059669'],
+        ['#f59e0b','#ef4444'], ['#ec4899','#8b5cf6'], ['#14b8a6','#0ea5e9'],
+        ['#f97316','#ec4899'], ['#84cc16','#14b8a6'],
+      ];
+      const [ac1, ac2] = AVATAR_GRAD2[patient.name.charCodeAt(0) % AVATAR_GRAD2.length];
+
       return (
-        <div className="flex flex-col h-full bg-slate-900">
+        <div className="flex flex-col h-full" style={{background:'#080d1a'}}>
+
           {/* Header */}
-          <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
-            <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
-              ← All Patients
+          <div className="px-5 pt-safe pb-5"
+            style={{background:'linear-gradient(180deg, rgba(99,102,241,0.09) 0%, transparent 100%), rgba(255,255,255,0.025)', borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
+            <button onClick={onBack}
+              className="flex items-center gap-1.5 text-indigo-400 text-sm mb-4 active:opacity-70">
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
+                <path d="M6 1L2 6l4 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              All Patients
             </button>
-            <div className="flex items-start justify-between">
-              <div>
-                <h1 className="text-white text-2xl font-bold leading-tight">{patient.name}</h1>
-                <p className="text-white/40 text-sm">{patient.id}</p>
+
+            <div className="flex items-center gap-4">
+              {/* Large avatar */}
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-xl flex-shrink-0"
+                style={{background:`linear-gradient(135deg, ${ac1}, ${ac2})`, boxShadow:`0 4px 20px ${ac1}55`}}>
+                {patient.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h1 className="text-white text-xl font-bold leading-tight truncate">{patient.name}</h1>
+                <p className="text-white/40 text-xs mt-0.5">{patient.id}</p>
                 {patient.dob && (
-                  <p className="text-white/35 text-xs mt-0.5">
+                  <p className="text-white/28 text-xs mt-0.5">
                     DOB: {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
                   </p>
                 )}
               </div>
-              <span className="text-white/35 text-xs mt-1">{procedures.length} procedures</span>
+              <div className="rounded-xl px-3 py-1.5 flex-shrink-0 text-center"
+                style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                <p className="text-white font-bold text-base leading-none">{procedures.length}</p>
+                <p className="text-white/35 text-[10px] mt-0.5">visit{procedures.length !== 1 ? 's' : ''}</p>
+              </div>
             </div>
           </div>
 
           {/* Procedures list */}
-          <div className="flex-1 overflow-y-auto no-scroll px-4 py-4 space-y-3">
+          <div className="flex-1 overflow-y-auto no-scroll px-4 py-4 space-y-2.5">
             {procedures.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 text-center gap-2">
-                <span className="text-4xl">📋</span>
-                <p className="text-white/40 text-sm">No procedures yet — add one to start capturing photos</p>
+              <div className="flex flex-col items-center justify-center h-48 text-center gap-4">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                  style={{background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                  <span className="text-3xl">📋</span>
+                </div>
+                <div>
+                  <p className="text-white/45 text-[15px] font-medium">No procedures yet</p>
+                  <p className="text-white/25 text-sm mt-1">Add a procedure to start capturing photos</p>
+                </div>
               </div>
             ) : (
-              procedures.map(proc => (
-                <button
-                  key={proc.id}
-                  onClick={() => onOpenProcedure(proc)}
-                  className="w-full bg-white/6 border border-white/10 rounded-2xl p-4 text-left active:scale-[0.98] transition-transform"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-white font-bold text-base">{proc.name}</p>
-                      <p className="text-white/40 text-sm mt-0.5">
-                        {new Date(proc.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
-                      </p>
-                      {proc.notes && <p className="text-white/30 text-xs mt-1">{proc.notes}</p>}
+              procedures.map(proc => {
+                const cs = PROC_CATEGORY_STYLE[proc.category] || PROC_CATEGORY_STYLE.both;
+                const count = photoCounts[proc.id] ?? 0;
+                return (
+                  <button key={proc.id} onClick={() => onOpenProcedure(proc)}
+                    className="w-full rounded-2xl p-4 text-left active:scale-[0.98] transition-transform fade-in-up overflow-hidden relative"
+                    style={{background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                    {/* Left accent strip */}
+                    <div className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full"
+                      style={{background:cs.accent}} />
+                    <div className="pl-3 flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-semibold text-[15px] leading-tight">{proc.name}</p>
+                        <p className="text-white/40 text-xs mt-1">
+                          {new Date(proc.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                        </p>
+                        {proc.notes && (
+                          <p className="text-white/25 text-xs mt-1 line-clamp-1">{proc.notes}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end gap-1.5 ml-3 flex-shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                          style={{background:cs.bg, border:`1px solid ${cs.border}`, color:cs.text}}>
+                          {proc.category === 'both' ? 'Face+Dental' : proc.category.charAt(0).toUpperCase() + proc.category.slice(1)}
+                        </span>
+                        <span className="text-white/30 text-xs">{count} photo{count !== 1 ? 's' : ''}</span>
+                      </div>
                     </div>
-                    <div className="text-right flex-shrink-0 ml-3">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                        proc.category === 'dental' ? 'bg-rose-600/20 text-rose-400' :
-                        proc.category === 'face' ? 'bg-blue-600/20 text-blue-400' :
-                        'bg-purple-600/20 text-purple-400'
-                      }`}>{proc.category === 'both' ? 'Face+Dental' : proc.category.charAt(0).toUpperCase() + proc.category.slice(1)}</span>
-                      <p className="text-white/30 text-xs mt-1">{photoCounts[proc.id] ?? 0} photos</p>
+                    {/* Arrow */}
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                      <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
+                        <path d="M1 1l5 5-5 5" stroke="rgba(255,255,255,0.2)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
                     </div>
-                  </div>
-                </button>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
 
-          {/* Add Procedure FAB */}
-          <div className="px-4 pb-safe pt-3 bg-slate-900 border-t border-white/8">
-            <button
-              onClick={() => setShowAddProc(true)}
-              className="w-full py-4 bg-blue-600 rounded-2xl text-white font-bold text-base active:scale-98"
-            >+ Add Procedure</button>
+          {/* Add Procedure button */}
+          <div className="px-4 pb-safe pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.07)'}}>
+            <button onClick={() => setShowAddProc(true)}
+              className="btn-primary w-full py-4 rounded-2xl text-white font-semibold text-[15px] transition-opacity">
+              + New Procedure
+            </button>
           </div>
 
           {showAddProc && (
@@ -2235,45 +2392,70 @@
         ? [{ label: 'Face', modes: FACE_MODES }, { label: 'Dental', modes: DENTAL_MODES }]
         : [{ label: procedure.category === 'face' ? 'Face' : 'Dental', modes: availableModes }];
 
+      /* Mode color map for capture buttons */
+      const MODE_COLOR = {
+        front:'#6366f1', left:'#8b5cf6', right:'#10b981',
+        teeth_front:'#f43f5e', upper_arch:'#0ea5e9', lower_arch:'#14b8a6',
+        left_buccal:'#ec4899', right_buccal:'#f97316',
+      };
+
       return (
-        <div className="flex flex-col h-full bg-slate-900">
+        <div className="flex flex-col h-full" style={{background:'#080d1a'}}>
 
           {/* Header */}
-          <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
-            <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
-              ← {patient.name}
+          <div className="px-5 pt-safe pb-4"
+            style={{background:'linear-gradient(180deg, rgba(99,102,241,0.09) 0%, transparent 100%), rgba(255,255,255,0.025)', borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
+            <button onClick={onBack}
+              className="flex items-center gap-1.5 text-indigo-400 text-sm mb-4 active:opacity-70">
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
+                <path d="M6 1L2 6l4 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {patient.name}
             </button>
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-white text-2xl font-bold leading-tight">{procedure.name}</h1>
-                <p className="text-white/40 text-sm">
+                <h1 className="text-white text-xl font-bold leading-tight">{procedure.name}</h1>
+                <p className="text-white/40 text-[13px] mt-0.5">
                   {new Date(procedure.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
                 </p>
               </div>
-              <span className="text-white/35 text-xs mt-1">{photos.length} photos</span>
+              <div className="rounded-xl px-3 py-1.5 text-center flex-shrink-0 ml-3"
+                style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                <p className="text-white font-bold text-base leading-none">{photos.length}</p>
+                <p className="text-white/35 text-[10px] mt-0.5">photo{photos.length !== 1 ? 's' : ''}</p>
+              </div>
             </div>
           </div>
 
-          {/* Capture mode buttons */}
-          <div className="bg-slate-800 px-4 py-3 border-b border-white/8 space-y-3">
+          {/* Capture mode grid */}
+          <div className="px-4 py-3 space-y-3"
+            style={{background:'rgba(255,255,255,0.02)', borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
             {modeGroups.map(group => (
               <div key={group.label}>
                 {modeGroups.length > 1 && (
-                  <p className="text-white/40 text-xs font-bold uppercase tracking-wider mb-1.5">{group.label}</p>
+                  <p className="section-label mb-2">{group.label}</p>
                 )}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {group.modes.map(mode => {
                     const st = modeStatus[mode.id] ?? {};
+                    const mc = MODE_COLOR[mode.id] || '#6366f1';
+                    const done = st.hasPre && st.hasPost;
                     return (
-                      <button
-                        key={mode.id}
+                      <button key={mode.id}
                         onClick={() => onStartCamera(mode.id, photos, procedure)}
-                        className="bg-white/8 border border-white/12 rounded-2xl p-3 text-center active:scale-95 transition-transform"
-                      >
-                        <p className="text-white font-bold text-sm">{mode.label}</p>
-                        <div className="flex justify-center gap-1 mt-1.5">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPre  ? 'bg-emerald-600 text-white' : 'bg-white/8 text-white/30'}`}>PRE</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${st.hasPost ? 'bg-amber-600  text-white' : 'bg-white/8 text-white/30'}`}>POST</span>
+                        className="rounded-xl p-2.5 text-center active:scale-95 transition-transform relative overflow-hidden"
+                        style={{
+                          background: done ? `${mc}18` : 'rgba(255,255,255,0.05)',
+                          border: `1px solid ${done ? mc + '40' : 'rgba(255,255,255,0.09)'}`,
+                        }}>
+                        {done && (
+                          <div className="absolute top-1 right-1 w-2 h-2 rounded-full"
+                            style={{background: mc}} />
+                        )}
+                        <p className="text-white font-semibold text-[11px] leading-tight">{mode.abbr}</p>
+                        <div className="flex justify-center gap-0.5 mt-1.5">
+                          <span className={`w-1.5 h-1.5 rounded-full ${st.hasPre ? 'bg-emerald-400' : 'bg-white/12'}`} />
+                          <span className={`w-1.5 h-1.5 rounded-full ${st.hasPost ? 'bg-amber-400' : 'bg-white/12'}`} />
                         </div>
                       </button>
                     );
@@ -2281,29 +2463,41 @@
                 </div>
               </div>
             ))}
+            <div className="flex items-center gap-3 pt-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span className="text-white/35 text-[10px]">PRE</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                <span className="text-white/35 text-[10px]">POST</span>
+              </div>
+              <span className="text-white/20 text-[10px] ml-auto">Tap to capture</span>
+            </div>
           </div>
 
-          {/* Filters */}
-          <div className="flex gap-2 px-4 py-2.5 overflow-x-auto no-scroll bg-slate-900 border-b border-white/8">
+          {/* Filter bar */}
+          <div className="flex gap-2 px-4 py-2.5 overflow-x-auto no-scroll"
+            style={{background:'rgba(255,255,255,0.015)', borderBottom:'1px solid rgba(255,255,255,0.06)'}}>
             {['all', ...availableModes.map(m => m.id)].map(m => (
-              <button key={m}
-                onClick={() => setFilterMode(m)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
-                  filterMode === m ? 'bg-blue-600 text-white' : 'bg-white/8 text-white/50'
-                }`}
-              >
-                {m === 'all' ? 'All Views' : CAPTURE_MODES[m]?.label}
+              <button key={m} onClick={() => setFilterMode(m)}
+                className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors"
+                style={filterMode === m
+                  ? {background:'linear-gradient(135deg, #6366f1, #8b5cf6)', color:'white'}
+                  : {background:'rgba(255,255,255,0.06)', color:'rgba(255,255,255,0.45)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                {m === 'all' ? 'All Views' : CAPTURE_MODES[m]?.abbr}
               </button>
             ))}
-            <div className="w-px bg-white/10 flex-shrink-0" />
+            <div className="w-px flex-shrink-0" style={{background:'rgba(255,255,255,0.1)'}} />
             {['all', 'pre', 'post'].map(t => (
-              <button key={t}
-                onClick={() => setFilterType(t)}
-                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
-                  filterType === t ? 'bg-purple-600 text-white' : 'bg-white/8 text-white/50'
-                }`}
-              >
-                {t === 'all' ? 'Pre & Post' : t.toUpperCase()}
+              <button key={t} onClick={() => setFilterType(t)}
+                className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors"
+                style={filterType === t
+                  ? {background: t === 'pre' ? 'rgba(52,211,153,0.25)' : t === 'post' ? 'rgba(251,191,36,0.25)' : 'rgba(139,92,246,0.25)',
+                     color: t === 'pre' ? '#6ee7b7' : t === 'post' ? '#fde68a' : '#ddd6fe',
+                     border: `1px solid ${t === 'pre' ? 'rgba(52,211,153,0.4)' : t === 'post' ? 'rgba(251,191,36,0.4)' : 'rgba(139,92,246,0.4)'}`}
+                  : {background:'rgba(255,255,255,0.06)', color:'rgba(255,255,255,0.45)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                {t === 'all' ? 'All' : t === 'pre' ? 'Pre' : 'Post'}
               </button>
             ))}
           </div>
@@ -2311,30 +2505,32 @@
           {/* Photo grid */}
           <div className="flex-1 overflow-y-auto no-scroll px-4 py-4">
             {Object.entries(grouped).length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 text-center gap-2">
-                <span className="text-4xl">📸</span>
-                <p className="text-white/40 text-sm">
-                  {photos.length === 0 ? 'No photos yet — tap a view above to capture' : 'No photos match the current filter'}
+              <div className="flex flex-col items-center justify-center h-44 text-center gap-4">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                  <span className="text-3xl">📸</span>
+                </div>
+                <p className="text-white/38 text-sm">
+                  {photos.length === 0 ? 'Tap a mode above to start capturing' : 'No photos match the current filter'}
                 </p>
               </div>
             ) : (
               Object.entries(grouped).map(([date, group]) => (
                 <div key={date} className="mb-6">
-                  <h3 className="text-white/40 text-xs font-bold uppercase tracking-widest mb-2.5">{date}</h3>
+                  <h3 className="section-label mb-2.5">{date}</h3>
                   <div className="grid grid-cols-3 gap-2">
                     {group.map(photo => (
-                      <button
-                        key={photo.id}
-                        onClick={() => setViewPhoto(photo)}
-                        className="relative aspect-[3/4] rounded-xl overflow-hidden border border-white/10 active:scale-95 transition-transform"
-                      >
-                        <img src={photo.dataUrl || photo.downloadUrl} alt="" className="w-full h-full object-cover" />
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 py-1.5">
+                      <button key={photo.id} onClick={() => setViewPhoto(photo)}
+                        className="relative aspect-[3/4] rounded-xl overflow-hidden active:scale-95 transition-transform"
+                        style={{border:'1px solid rgba(255,255,255,0.09)'}}>
+                        <img src={photo.dataUrl || photo.downloadUrl} alt=""
+                          className="w-full h-full object-cover" />
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5">
                           <div className="flex items-end justify-between">
-                            <span className="text-white text-[10px] font-bold leading-none">
+                            <span className="text-white/80 text-[10px] font-bold leading-none">
                               {CAPTURE_MODES[photo.captureMode]?.abbr}
                             </span>
-                            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full leading-none ${
+                            <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded-full leading-none ${
                               photo.photoType === 'pre' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-black'
                             }`}>
                               {photo.photoType.toUpperCase()}
@@ -2351,34 +2547,48 @@
 
           {/* Full-screen photo viewer */}
           {viewPhoto && (
-            <div className="fixed inset-0 z-50 bg-black flex flex-col">
-              <div className="pt-safe px-5 pb-3 flex items-center justify-between bg-black/50">
-                <button onClick={() => setViewPhoto(null)} className="text-white/70 text-xl">✕</button>
+            <div className="fixed inset-0 z-50 flex flex-col" style={{background:'#000'}}>
+              {/* Viewer header */}
+              <div className="pt-safe px-5 pb-3 flex items-center justify-between"
+                style={{background:'rgba(0,0,0,0.7)', backdropFilter:'blur(12px)', borderBottom:'1px solid rgba(255,255,255,0.08)'}}>
+                <button onClick={() => setViewPhoto(null)}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:opacity-70"
+                  style={{background:'rgba(255,255,255,0.08)'}}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M1 1l12 12M13 1L1 13" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+                  </svg>
+                </button>
                 <div className="text-center">
-                  <p className="text-white font-bold text-sm">{CAPTURE_MODES[viewPhoto.captureMode]?.label}</p>
+                  <p className="text-white font-semibold text-sm">{CAPTURE_MODES[viewPhoto.captureMode]?.label}</p>
                   <p className={`text-xs font-bold ${viewPhoto.photoType === 'pre' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {viewPhoto.photoType.toUpperCase()}-TREATMENT
+                    {viewPhoto.photoType === 'pre' ? 'PRE-TREATMENT' : 'POST-TREATMENT'}
                   </p>
                 </div>
-                <button onClick={() => downloadPhoto(viewPhoto)} className="text-white/70 text-xl" aria-label="Download">⬇</button>
+                <button onClick={() => downloadPhoto(viewPhoto)} aria-label="Download"
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:opacity-70"
+                  style={{background:'rgba(255,255,255,0.08)'}}>
+                  <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                    <path d="M7.5 1v9M4 7l3.5 3.5L11 7" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M1 12h13" stroke="white" strokeWidth="1.6" strokeLinecap="round"/>
+                  </svg>
+                </button>
               </div>
 
-              <div className="flex-1 flex items-center justify-center p-3">
-                <img
-                  src={viewPhoto.dataUrl}
-                  alt="clinical photo"
-                  className="max-w-full max-h-full object-contain rounded-xl"
-                />
+              {/* Image */}
+              <div className="flex-1 flex items-center justify-center p-4">
+                <img src={viewPhoto.dataUrl || viewPhoto.downloadUrl} alt="clinical photo"
+                  className="max-w-full max-h-full object-contain rounded-2xl" />
               </div>
 
-              <div className="px-5 pb-safe pt-3 bg-black/60">
-                <p className="text-white/35 text-center text-xs mb-3">
+              {/* Viewer footer */}
+              <div className="px-5 pb-safe pt-3"
+                style={{background:'rgba(0,0,0,0.7)', backdropFilter:'blur(12px)', borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+                <p className="text-white/30 text-center text-xs mb-3">
                   {new Date(viewPhoto.timestamp).toLocaleString()} · {viewPhoto.width}×{viewPhoto.height}
                 </p>
-                <button
-                  onClick={() => deletePhoto(viewPhoto.id)}
-                  className="w-full py-3.5 rounded-xl border border-red-800 bg-red-950/50 text-red-400 font-bold text-sm active:scale-98"
-                >
+                <button onClick={() => deletePhoto(viewPhoto.id)}
+                  className="w-full py-3.5 rounded-xl text-red-400 font-semibold text-sm active:scale-[0.98] transition-transform"
+                  style={{background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)'}}>
                   Delete Photo
                 </button>
               </div>
@@ -2397,82 +2607,111 @@
         p.id.toLowerCase().includes(q.toLowerCase())
       );
 
+      /* Avatar gradient palette — deterministic based on name initial */
+      const AVATAR_GRAD = [
+        ['#6366f1','#8b5cf6'], ['#0ea5e9','#6366f1'], ['#10b981','#059669'],
+        ['#f59e0b','#ef4444'], ['#ec4899','#8b5cf6'], ['#14b8a6','#0ea5e9'],
+        ['#f97316','#ec4899'], ['#84cc16','#14b8a6'],
+      ];
+      const avatarGrad = (name) => AVATAR_GRAD[name.charCodeAt(0) % AVATAR_GRAD.length];
+
       return (
-        <div className="flex flex-col h-full bg-slate-900">
+        <div className="flex flex-col h-full" style={{background:'#080d1a'}}>
 
           {/* Header */}
-          <div className="bg-slate-800 pt-safe px-5 pb-4 border-b border-white/8">
+          <div className="pt-safe px-5 pb-4"
+            style={{background:'linear-gradient(180deg, rgba(99,102,241,0.10) 0%, rgba(99,102,241,0.03) 100%), rgba(255,255,255,0.02)', borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h1 className="text-white text-2xl font-bold">PhotoGuide</h1>
-                <p className="text-white/35 text-xs">Clinical Photography System</p>
+                <h1 className="text-white text-[22px] font-bold tracking-tight">PhotoGuide</h1>
+                <p className="text-white/35 text-xs mt-0.5">
+                  {patients.length > 0 ? `${patients.length} patient${patients.length !== 1 ? 's' : ''}` : 'Clinical Photography'}
+                </p>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={onSettings}
-                  aria-label="Settings"
-                  className="w-11 h-11 bg-white/8 rounded-full flex items-center justify-center text-white/60 text-lg active:scale-90 transition-transform"
-                >
-                  ⚙
+              <div className="flex items-center gap-2.5">
+                {/* Settings button */}
+                <button onClick={onSettings} aria-label="Settings"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center active:scale-90 transition-transform"
+                  style={{background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)'}}>
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                    <circle cx="10" cy="10" r="2.75" stroke="rgba(255,255,255,0.65)" strokeWidth="1.6"/>
+                    <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42"
+                      stroke="rgba(255,255,255,0.65)" strokeWidth="1.6" strokeLinecap="round"/>
+                  </svg>
                 </button>
-                <button
-                  onClick={onAdd}
-                  aria-label="Add patient"
-                  className="w-11 h-11 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-light active:scale-90 transition-transform"
-                >
+                {/* Add patient button */}
+                <button onClick={onAdd} aria-label="Add patient"
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xl font-light active:scale-90 transition-transform btn-primary">
                   +
                 </button>
               </div>
             </div>
-            <input
-              type="search"
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="Search patients or chart ID…"
-              className="w-full bg-slate-700 border border-white/12 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500"
-            />
+
+            {/* Search */}
+            <div className="relative">
+              <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" width="15" height="15" viewBox="0 0 16 16" fill="none">
+                <circle cx="6.5" cy="6.5" r="4.5" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5"/>
+                <path d="M10 10l3.5 3.5" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              <input
+                type="search" value={q} onChange={e => setQ(e.target.value)}
+                placeholder="Search patients or chart ID…"
+                className="field-input w-full pl-10 pr-4 py-2.5 rounded-xl text-white placeholder-white/30 text-sm"
+                style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.09)'}}
+              />
+            </div>
           </div>
 
-          {/* List */}
-          <div className="flex-1 overflow-y-auto no-scroll p-4 space-y-2.5">
-            {filtered.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-52 text-center gap-3">
-                <span className="text-5xl">{patients.length === 0 ? '👤' : '🔍'}</span>
-                <p className="text-white/45 text-base">
-                  {patients.length === 0 ? 'No patients yet' : 'No results'}
-                </p>
-                {patients.length === 0 && (
-                  <p className="text-white/30 text-sm">Tap + to add your first patient</p>
-                )}
-              </div>
-            )}
-
-            {filtered.map(patient => (
-              <button
-                key={patient.id}
-                onClick={() => onSelect(patient)}
-                className="w-full bg-slate-800 border border-white/8 rounded-2xl px-4 py-3.5 flex items-center gap-4 text-left active:scale-98 transition-transform"
-              >
-                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-base flex-shrink-0">
-                  {patient.name.charAt(0).toUpperCase()}
+          {/* Patient list */}
+          <div className="flex-1 overflow-y-auto no-scroll px-4 py-3 space-y-2">
+            {filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-52 text-center gap-4">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                  style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)'}}>
+                  <span className="text-3xl">{patients.length === 0 ? '👤' : '🔍'}</span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-semibold text-base leading-tight truncate">{patient.name}</p>
-                  <p className="text-white/40 text-xs mt-0.5">{patient.id}</p>
-                  {patient.dob && (
-                    <p className="text-white/30 text-xs">DOB {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}</p>
+                <div>
+                  <p className="text-white/50 text-[15px] font-medium">
+                    {patients.length === 0 ? 'No patients yet' : 'No results found'}
+                  </p>
+                  {patients.length === 0 && (
+                    <p className="text-white/28 text-sm mt-1">Tap + to add your first patient</p>
                   )}
                 </div>
-                <span className="text-white/25 text-xl">›</span>
-              </button>
-            ))}
+              </div>
+            ) : (
+              filtered.map(patient => {
+                const [c1, c2] = avatarGrad(patient.name);
+                return (
+                  <button key={patient.id} onClick={() => onSelect(patient)}
+                    className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3.5 text-left active:scale-[0.98] transition-transform fade-in-up"
+                    style={{background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)'}}>
+                    {/* Avatar */}
+                    <div className="w-11 h-11 rounded-[11px] flex items-center justify-center text-white font-bold text-base flex-shrink-0"
+                      style={{background:`linear-gradient(135deg, ${c1}, ${c2})`}}>
+                      {patient.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-semibold text-[15px] leading-tight truncate">{patient.name}</p>
+                      <p className="text-white/38 text-xs mt-0.5">{patient.id}</p>
+                      {patient.dob && (
+                        <p className="text-white/25 text-xs mt-0.5">
+                          DOB {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                    <svg width="7" height="12" viewBox="0 0 7 12" fill="none" className="flex-shrink-0">
+                      <path d="M1 1l5 5-5 5" stroke="rgba(255,255,255,0.22)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                );
+              })
+            )}
           </div>
 
           {/* Footer */}
-          <div className="px-5 pb-safe pt-2 border-t border-white/8 bg-slate-900">
-            <p className="text-white/20 text-[10px] text-center">
-              Photos stored locally on this device · IndexedDB cache
-            </p>
+          <div className="px-5 pb-safe pt-2 text-center" style={{borderTop:'1px solid rgba(255,255,255,0.06)'}}>
+            <p className="text-white/18 text-[10px]">Encrypted · Synced to Firebase · Multi-device</p>
           </div>
         </div>
       );
@@ -2491,29 +2730,32 @@
       };
 
       return (
-        <div className="fixed bottom-24 inset-x-4 z-40 bg-slate-800/95 backdrop-blur-xl border border-blue-600/40 rounded-2xl p-4 shadow-2xl">
-          <button
-            onClick={onDismiss}
-            className="absolute top-3 right-3 text-white/40 text-lg leading-none"
-          >✕</button>
+        <div className="fixed bottom-24 inset-x-4 z-40 rounded-2xl p-4 shadow-2xl"
+          style={{background:'rgba(15,23,42,0.96)', backdropFilter:'blur(20px)', border:'1px solid rgba(99,102,241,0.3)'}}>
+          <button onClick={onDismiss}
+            className="absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center active:opacity-70"
+            style={{background:'rgba(255,255,255,0.08)'}}>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M1 1l8 8M9 1L1 9" stroke="rgba(255,255,255,0.5)" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </button>
           <div className="flex items-start gap-3 pr-6">
-            <span className="text-3xl flex-shrink-0">📲</span>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-xl"
+              style={{background:'rgba(99,102,241,0.2)', border:'1px solid rgba(99,102,241,0.3)'}}>📲</div>
             <div>
-              <p className="text-white font-bold text-sm">Install PhotoGuide</p>
+              <p className="text-white font-semibold text-sm">Install PhotoGuide</p>
               {isIOS ? (
-                <p className="text-white/50 text-xs mt-1 leading-relaxed">
-                  Tap <strong className="text-white/70">Share</strong> → <strong className="text-white/70">Add to Home Screen</strong> for offline access and native experience.
+                <p className="text-white/45 text-xs mt-1 leading-relaxed">
+                  Tap <strong className="text-white/65">Share</strong> → <strong className="text-white/65">Add to Home Screen</strong> for offline access and full-screen mode.
                 </p>
               ) : (
-                <p className="text-white/50 text-xs mt-1 leading-relaxed">
-                  Install for offline use, faster loading, and full-screen capture mode.
+                <p className="text-white/45 text-xs mt-1 leading-relaxed">
+                  Install for offline access, faster loading, and full-screen capture.
                 </p>
               )}
               {!isIOS && deferredPrompt && (
-                <button
-                  onClick={handleInstall}
-                  className="mt-2.5 px-4 py-1.5 bg-blue-600 rounded-full text-white text-xs font-bold active:scale-95"
-                >
+                <button onClick={handleInstall}
+                  className="mt-2.5 px-4 py-1.5 rounded-full text-white text-xs font-semibold active:scale-95 btn-primary">
                   Install Now
                 </button>
               )}
@@ -2713,183 +2955,225 @@
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
       };
 
+      /* Helper: section card */
+      const SCard = ({ children, accent }) => (
+        <div className="rounded-2xl p-4 space-y-4"
+          style={{background:'rgba(255,255,255,0.04)', border:`1px solid ${accent || 'rgba(255,255,255,0.08)'}`}}>
+          {children}
+        </div>
+      );
+
+      const SSection = ({ icon, title, badge }) => (
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-base"
+            style={{background:'rgba(255,255,255,0.07)'}}>
+            {icon}
+          </div>
+          <span className="text-white font-semibold text-[15px]">{title}</span>
+          {badge && <span className="ml-auto">{badge}</span>}
+        </div>
+      );
+
       return (
-        <div className="flex flex-col h-full bg-slate-900">
-          <div className="bg-slate-800 px-4 pt-safe pb-4 border-b border-white/8">
-            <button onClick={onBack} className="text-blue-400 text-sm flex items-center gap-1 mb-3">
-              ← Back
+        <div className="flex flex-col h-full" style={{background:'#080d1a'}}>
+
+          {/* Header */}
+          <div className="px-5 pt-safe pb-4"
+            style={{background:'linear-gradient(180deg, rgba(99,102,241,0.09) 0%, transparent 100%), rgba(255,255,255,0.025)', borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
+            <button onClick={onBack}
+              className="flex items-center gap-1.5 text-indigo-400 text-sm mb-4 active:opacity-70">
+              <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
+                <path d="M6 1L2 6l4 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Back
             </button>
-            <h1 className="text-white text-2xl font-bold">Settings</h1>
+            <h1 className="text-white text-xl font-bold">Settings</h1>
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scroll px-4 py-5 space-y-6">
+          <div className="flex-1 overflow-y-auto no-scroll px-4 py-5 space-y-4">
 
-            {/* Signed-in user info */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="text-white/40 text-xs">Signed in as</p>
-                <p className="text-white text-sm font-medium">{currentUserEmail}</p>
-                {isAdmin && <span className="text-amber-400 text-[10px] font-bold">ADMINISTRATOR</span>}
-              </div>
-              <button onClick={handleLogout}
-                className="px-3 py-1.5 bg-red-600/20 border border-red-500/40 rounded-lg text-red-400 text-xs font-bold active:scale-95"
-              >Sign Out</button>
-            </div>
-
-            {/* Admin: User Approvals */}
-            {isAdmin && (
-              <div className="bg-white/5 border border-amber-500/30 rounded-2xl p-4 space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">👥</span>
-                  <h2 className="text-white font-bold text-base">Staff Access</h2>
-                  {pendingUsers.length > 0 && (
-                    <span className="ml-auto px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded-full text-amber-400 text-[10px] font-bold">
-                      {pendingUsers.length} PENDING
+            {/* Account section */}
+            <SCard>
+              <SSection icon="👤" title="Account" />
+              <div className="flex items-center justify-between rounded-xl px-3.5 py-3"
+                style={{background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)'}}>
+                <div>
+                  <p className="text-white/50 text-[11px] font-medium mb-0.5">Signed in as</p>
+                  <p className="text-white text-sm font-medium">{currentUserEmail}</p>
+                  {isAdmin && (
+                    <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-bold"
+                      style={{background:'rgba(251,191,36,0.15)', color:'#fbbf24', border:'1px solid rgba(251,191,36,0.3)'}}>
+                      ADMINISTRATOR
                     </span>
                   )}
                 </div>
+                <button onClick={handleLogout}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold active:scale-95 transition-transform"
+                  style={{background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.25)', color:'#f87171'}}>
+                  Sign Out
+                </button>
+              </div>
+            </SCard>
 
-                {/* Pending approvals */}
+            {/* Admin: Staff access */}
+            {isAdmin && (
+              <SCard accent="rgba(251,191,36,0.2)">
+                <SSection icon="👥" title="Staff Access"
+                  badge={pendingUsers.length > 0 ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                      style={{background:'rgba(251,191,36,0.2)', border:'1px solid rgba(251,191,36,0.4)', color:'#fbbf24'}}>
+                      {pendingUsers.length} PENDING
+                    </span>
+                  ) : null} />
+
                 {pendingUsers.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-white/50 text-xs font-bold uppercase tracking-wide">Awaiting Approval</p>
+                    <p className="section-label">Awaiting Approval</p>
                     {pendingUsers.map(u => (
-                      <div key={u.uid} className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                        <p className="text-white/80 text-sm truncate flex-1 mr-2">{u.email}</p>
-                        <div className="flex gap-2 flex-shrink-0">
-                          <button onClick={() => handleApproveUser(u.uid)}
-                            className="px-3 py-1.5 bg-emerald-600 rounded-lg text-white text-xs font-bold active:scale-95"
-                          >Approve</button>
-                          <button onClick={() => handleRejectUser(u.uid)}
-                            className="px-3 py-1.5 bg-red-600/80 rounded-lg text-white text-xs font-bold active:scale-95"
-                          >Reject</button>
-                        </div>
+                      <div key={u.uid} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                        style={{background:'rgba(251,191,36,0.07)', border:'1px solid rgba(251,191,36,0.2)'}}>
+                        <p className="text-white/80 text-sm truncate flex-1">{u.email}</p>
+                        <button onClick={() => handleApproveUser(u.uid)}
+                          className="px-3 py-1.5 rounded-lg text-white text-xs font-semibold active:scale-95"
+                          style={{background:'rgba(52,211,153,0.85)'}}>Approve</button>
+                        <button onClick={() => handleRejectUser(u.uid)}
+                          className="px-3 py-1.5 rounded-lg text-white text-xs font-semibold active:scale-95"
+                          style={{background:'rgba(239,68,68,0.75)'}}>Reject</button>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* All approved staff */}
                 {allUsers.filter(u => u.status === 'approved' && u.email !== ADMIN_EMAIL).length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-white/50 text-xs font-bold uppercase tracking-wide">Approved Staff</p>
+                    <p className="section-label">Approved Staff</p>
                     {allUsers.filter(u => u.status === 'approved' && u.email !== ADMIN_EMAIL).map(u => (
-                      <div key={u.uid} className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                        <div>
-                          <p className="text-white/80 text-sm">{u.email}</p>
-                          <p className="text-emerald-400 text-[10px]">✓ Access granted</p>
+                      <div key={u.uid} className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                        style={{background:'rgba(52,211,153,0.06)', border:'1px solid rgba(52,211,153,0.15)'}}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white/80 text-sm truncate">{u.email}</p>
+                          <p className="text-emerald-400 text-[10px] mt-0.5">✓ Access granted</p>
                         </div>
                         <button onClick={() => handleRevokeUser(u.uid, u.email)}
-                          className="px-3 py-1.5 bg-white/8 rounded-lg text-red-400/70 text-xs active:scale-95"
-                        >Revoke</button>
+                          className="px-3 py-1.5 rounded-lg text-xs active:scale-95"
+                          style={{background:'rgba(255,255,255,0.07)', color:'rgba(248,113,113,0.75)'}}>Revoke</button>
                       </div>
                     ))}
                   </div>
                 )}
 
                 {pendingUsers.length === 0 && allUsers.filter(u => u.status === 'approved' && u.email !== ADMIN_EMAIL).length === 0 && (
-                  <p className="text-white/30 text-sm text-center py-2">No staff accounts yet</p>
+                  <p className="text-white/28 text-sm text-center py-2">No staff accounts yet</p>
                 )}
-              </div>
+              </SCard>
             )}
 
-            {/* Firebase Cloud Storage (Hardcoded) */}
-            <div className="bg-white/5 border border-orange-500/30 rounded-2xl p-4 space-y-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">🔥</span>
-                <h2 className="text-white font-bold text-base">Firebase Cloud Storage</h2>
-                <span className="ml-auto px-2 py-0.5 bg-emerald-500/20 border border-emerald-500/40 rounded-full text-emerald-400 text-[10px] font-bold">
-                  ✓ ACTIVE
-                </span>
-              </div>
-
-              <p className="text-white/50 text-sm">
-                All patient data, procedures, and photos sync automatically to Firebase. Data is backed up to the cloud and accessible from any device.
+            {/* Firebase Cloud Storage */}
+            <SCard accent="rgba(249,115,22,0.25)">
+              <SSection icon="🔥" title="Firebase Cloud Sync"
+                badge={
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                    style={{background:'rgba(52,211,153,0.15)', border:'1px solid rgba(52,211,153,0.35)', color:'#6ee7b7'}}>
+                    ACTIVE
+                  </span>
+                } />
+              <p className="text-white/45 text-sm leading-relaxed">
+                Patient data, procedures, and photos sync automatically across all devices.
               </p>
-
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
-                  <span className="text-white/40 text-sm">📊 Sync Status:</span>
-                  <p className="text-white/60 text-sm font-mono">
-                    {fbSyncPending} pending · {fbSyncErrors} errors
-                  </p>
+              <div className="rounded-xl px-3.5 py-3 space-y-2"
+                style={{background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)'}}>
+                <div className="flex justify-between text-xs">
+                  <span className="text-white/40">Pending uploads</span>
+                  <span className="text-white/65 font-mono">{fbSyncPending}</span>
                 </div>
-
-                <div className="flex gap-2">
-                  {fbSyncPending > 0 && (
-                    <button onClick={handleFirebaseSyncNow}
-                      className="flex-1 py-2.5 bg-orange-600 rounded-xl text-white text-sm font-bold active:scale-95"
-                    >Sync Now</button>
-                  )}
-                  <button onClick={handleInitialSync} disabled={fbInitialSync}
-                    className="flex-1 py-2.5 bg-white/8 rounded-xl text-white/70 text-sm font-medium active:scale-95 disabled:opacity-50"
-                  >{fbInitialSync ? 'Uploading…' : '↑ Upload All Data'}</button>
+                <div className="flex justify-between text-xs">
+                  <span className="text-white/40">Sync errors</span>
+                  <span className={fbSyncErrors > 0 ? 'text-red-400 font-mono' : 'text-white/65 font-mono'}>{fbSyncErrors}</span>
                 </div>
               </div>
-            </div>
+              <div className="flex gap-2">
+                {fbSyncPending > 0 && (
+                  <button onClick={handleFirebaseSyncNow}
+                    className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold active:scale-95"
+                    style={{background:'rgba(249,115,22,0.8)'}}>
+                    Sync Now
+                  </button>
+                )}
+                <button onClick={handleInitialSync} disabled={fbInitialSync}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium active:scale-95 disabled:opacity-50"
+                  style={{background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.1)', color:'rgba(255,255,255,0.65)'}}>
+                  {fbInitialSync ? 'Uploading…' : '↑ Upload All'}
+                </button>
+              </div>
+            </SCard>
 
             {/* Google Drive Backup */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-4">
-              <h2 className="text-white font-bold text-base">Google Drive Backup</h2>
-
-              <label className="block">
-                <span className="text-white/50 text-sm block mb-1">Google OAuth Client ID</span>
-                <input
-                  type="text" value={clientId}
-                  onChange={e => setClientId(e.target.value)}
-                  onBlur={saveClientId}
+            <SCard>
+              <SSection icon="☁️" title="Google Drive Backup" />
+              <div>
+                <label className="section-label block mb-1.5">OAuth Client ID</label>
+                <input type="text" value={clientId}
+                  onChange={e => setClientId(e.target.value)} onBlur={saveClientId}
                   placeholder="xxxx.apps.googleusercontent.com"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500 font-mono"
+                  className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-sm font-mono"
+                  style={{background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)'}}
                 />
-                <span className="text-white/30 text-xs mt-1 block">Create at console.cloud.google.com → APIs → Credentials</span>
-              </label>
-
+                <p className="text-white/28 text-xs mt-1.5">Create at console.cloud.google.com → APIs → Credentials</p>
+              </div>
               {driveEnabled ? (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between rounded-xl px-3.5 py-2.5"
+                    style={{background:'rgba(52,211,153,0.07)', border:'1px solid rgba(52,211,153,0.2)'}}>
                     <div>
-                      <p className="text-emerald-400 text-sm font-bold">Connected</p>
+                      <p className="text-emerald-400 text-sm font-semibold">Connected</p>
                       <p className="text-white/40 text-xs">{driveEmail}</p>
                     </div>
                     <button onClick={handleSignOut}
-                      className="px-4 py-2 bg-white/8 rounded-xl text-white/60 text-sm font-medium active:scale-95"
-                    >Sign Out</button>
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium active:scale-95"
+                      style={{background:'rgba(255,255,255,0.07)', color:'rgba(255,255,255,0.6)'}}>Sign Out</button>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <p className="text-white/40 text-xs">
-                      {pendingCount} pending · {errorCount} errors
-                    </p>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/38">{pendingCount} pending · {errorCount} errors</span>
                     {pendingCount > 0 && (
                       <button onClick={handleUploadNow}
-                        className="px-3 py-1.5 bg-blue-600 rounded-lg text-white text-xs font-bold active:scale-95"
-                      >Upload Now</button>
+                        className="px-3 py-1.5 rounded-lg text-white text-xs font-semibold active:scale-95 btn-primary">
+                        Upload Now
+                      </button>
                     )}
                   </div>
                 </div>
               ) : (
                 <button onClick={handleSignIn} disabled={signingIn}
-                  className="w-full py-3.5 bg-blue-600 rounded-xl text-white font-bold text-sm active:scale-98 disabled:opacity-50"
-                >{signingIn ? 'Signing in…' : 'Sign In with Google'}</button>
+                  className="w-full py-3.5 rounded-xl text-white font-semibold text-sm active:scale-[0.98] disabled:opacity-50 btn-primary">
+                  {signingIn ? 'Signing in…' : 'Connect Google Drive'}
+                </button>
               )}
-            </div>
+            </SCard>
 
             {/* Storage */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
-              <h2 className="text-white font-bold text-base">Storage</h2>
+            <SCard>
+              <SSection icon="💾" title="Local Storage" />
               {storageUsed ? (
-                <div>
-                  <p className="text-white/50 text-sm">
-                    Using {formatBytes(storageUsed.usage)} of {formatBytes(storageUsed.quota)}
-                  </p>
-                  <div className="w-full h-2 bg-white/10 rounded-full mt-2 overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, (storageUsed.usage / storageUsed.quota) * 100)}%` }} />
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-white/50">Used</span>
+                    <span className="text-white/75 font-medium">{formatBytes(storageUsed.usage)}</span>
                   </div>
+                  <div className="w-full h-1.5 rounded-full overflow-hidden"
+                    style={{background:'rgba(255,255,255,0.08)'}}>
+                    <div className="h-full rounded-full"
+                      style={{
+                        width:`${Math.min(100, (storageUsed.usage / storageUsed.quota) * 100)}%`,
+                        background:'linear-gradient(90deg, #6366f1, #8b5cf6)'
+                      }} />
+                  </div>
+                  <p className="text-white/28 text-xs">{formatBytes(storageUsed.quota)} quota</p>
                 </div>
               ) : (
-                <p className="text-white/40 text-sm">Storage estimate not available</p>
+                <p className="text-white/38 text-sm">Storage estimate unavailable</p>
               )}
-              <p className="text-white/30 text-xs">Photos stored locally on this device via IndexedDB</p>
-            </div>
+              <p className="text-white/25 text-xs">Photos saved locally via IndexedDB · Synced to Firebase</p>
+            </SCard>
 
           </div>
         </div>
@@ -2940,69 +3224,99 @@
       };
 
       return (
-        <div className="h-full flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 px-4">
-          <div className="w-full max-w-sm space-y-6">
-            {/* Header */}
-            <div className="text-center space-y-2">
-              <h1 className="text-3xl font-bold text-white">PhotoGuide</h1>
-              <p className="text-white/40 text-sm">Clinical Photography System</p>
+        <div className="h-full flex flex-col items-center justify-center relative overflow-hidden px-5"
+          style={{background: 'radial-gradient(ellipse at 25% 15%, rgba(99,102,241,0.14) 0%, transparent 55%), radial-gradient(ellipse at 75% 85%, rgba(139,92,246,0.10) 0%, transparent 55%), #080d1a'}}>
+
+          {/* Ambient glow blobs */}
+          <div className="absolute -top-40 -left-24 w-96 h-96 rounded-full pointer-events-none"
+            style={{background: 'rgba(99,102,241,0.06)', filter: 'blur(60px)'}} />
+          <div className="absolute -bottom-40 -right-24 w-96 h-96 rounded-full pointer-events-none"
+            style={{background: 'rgba(139,92,246,0.06)', filter: 'blur(60px)'}} />
+
+          <div className="w-full max-w-sm relative z-10 space-y-7">
+
+            {/* Logo mark + wordmark */}
+            <div className="text-center space-y-4">
+              <div className="w-20 h-20 rounded-[1.4rem] mx-auto flex items-center justify-center"
+                style={{background: 'linear-gradient(145deg, #6366f1, #8b5cf6)', boxShadow: '0 0 0 1px rgba(255,255,255,0.12), 0 8px 40px rgba(99,102,241,0.38)'}}>
+                <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
+                  <circle cx="19" cy="19" r="10" stroke="white" strokeWidth="2" fill="none" strokeOpacity="0.9"/>
+                  <circle cx="19" cy="19" r="3.5" fill="white"/>
+                  <line x1="19" y1="7" x2="19" y2="31" stroke="white" strokeWidth="1.5" strokeOpacity="0.3" strokeLinecap="round"/>
+                  <line x1="7"  y1="19" x2="31" y2="19" stroke="white" strokeWidth="1.5" strokeOpacity="0.3" strokeLinecap="round"/>
+                  <circle cx="29" cy="10" r="2.5" fill="white" fillOpacity="0.85"/>
+                  <circle cx="29" cy="10" r="1" fill="white"/>
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-white text-3xl font-bold tracking-tight">PhotoGuide</h1>
+                <p className="text-white/35 text-[13px] mt-1 tracking-wide">Clinical Photography System</p>
+              </div>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleAuth} className="space-y-4">
-              <div>
-                <label className="block text-white/50 text-sm mb-1">Email</label>
-                <input
-                  type="email" value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="clinic@example.com"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-white/50 text-sm mb-1">Password</label>
-                <input
-                  type="password" value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-slate-700 border border-white/15 rounded-xl px-4 py-3 text-white placeholder-white/40 text-sm focus:outline-none focus:border-blue-500"
-                />
-              </div>
+            {/* Auth card */}
+            <div className="rounded-2xl p-6 space-y-5"
+              style={{background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', backdropFilter: 'blur(20px)'}}>
 
-              {error && (
-                <div className="bg-red-500/20 border border-red-500/40 rounded-lg px-3 py-2">
-                  <p className="text-red-400 text-xs">{error}</p>
+              <p className="text-white/60 text-sm font-medium">
+                {isRegister ? 'Create your account' : 'Welcome back'}
+              </p>
+
+              <form onSubmit={handleAuth} className="space-y-3.5">
+                <div className="space-y-1.5">
+                  <label className="section-label">Email address</label>
+                  <input
+                    type="email" value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="you@clinic.com"
+                    className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-sm transition-all"
+                    style={{background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)'}}
+                  />
                 </div>
-              )}
+                <div className="space-y-1.5">
+                  <label className="section-label">Password</label>
+                  <input
+                    type="password" value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-sm transition-all"
+                    style={{background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)'}}
+                  />
+                </div>
 
-              <button type="submit" disabled={loading}
-                className="w-full py-3 bg-blue-600 rounded-xl text-white font-bold text-sm active:scale-98 disabled:opacity-50"
-              >
-                {loading ? (isRegister ? 'Creating account…' : 'Signing in…') : (isRegister ? 'Create Account' : 'Sign In')}
-              </button>
-            </form>
+                {error && (
+                  <div className="flex gap-2 items-start rounded-xl px-3.5 py-2.5"
+                    style={{background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)'}}>
+                    <span className="text-red-400 text-xs leading-5">{error}</span>
+                  </div>
+                )}
 
-            {/* Toggle */}
-            <div className="text-center">
-              <p className="text-white/50 text-xs">
-                {isRegister ? 'Already have an account?' : 'First time?'}
+                <button type="submit" disabled={loading}
+                  className="btn-primary w-full py-3.5 rounded-xl text-white font-semibold text-sm disabled:opacity-50 transition-opacity"
+                >
+                  {loading ? (isRegister ? 'Creating account…' : 'Signing in…') : (isRegister ? 'Create Account' : 'Sign In')}
+                </button>
+              </form>
+
+              <div className="text-center">
+                <span className="text-white/30 text-xs">
+                  {isRegister ? 'Already have an account? ' : 'New to PhotoGuide? '}
+                </span>
                 <button
                   onClick={() => { setIsRegister(!isRegister); setError(''); }}
-                  className="ml-1 text-blue-400 font-bold underline"
+                  className="text-indigo-400 text-xs font-semibold"
                 >
-                  {isRegister ? 'Sign in' : 'Create account'}
+                  {isRegister ? 'Sign in' : 'Register'}
                 </button>
-              </p>
+              </div>
             </div>
 
-            {/* Info */}
-            <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-center">
-              <p className="text-white/40 text-xs leading-relaxed">
-                {isRegister
-                  ? 'New accounts require approval from the clinic administrator before access is granted.'
-                  : 'Only approved clinic staff can access patient data.'}
-              </p>
-            </div>
+            {/* Footer note */}
+            <p className="text-center text-white/22 text-[11px] leading-relaxed px-2">
+              {isRegister
+                ? 'New accounts require approval from the clinic administrator before access is granted.'
+                : 'Access restricted to approved clinic staff · Secured by Firebase Auth'}
+            </p>
           </div>
         </div>
       );
@@ -3223,32 +3537,31 @@
 
           {/* PRE / POST modal */}
           {showTypeModal && (
-            <div className="fixed inset-0 z-50 flex items-end bg-black/75">
-              <div className="bg-slate-800 w-full rounded-t-3xl px-5 pt-6 pb-10">
-                <h2 className="text-white text-xl font-bold mb-1">{CAPTURE_MODES[cameraMode]?.label}</h2>
-                <p className="text-white/45 text-sm mb-6">Is this photo before or after treatment?</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    onClick={() => handleTypeChosen('pre')}
-                    className="py-6 bg-emerald-600 rounded-2xl text-white font-bold text-lg flex flex-col items-center gap-2 active:scale-95 transition-transform"
-                  >
-                    <span className="text-3xl">📸</span>
-                    <span>PRE</span>
-                    <span className="text-sm font-normal opacity-70">Before treatment</span>
+            <div className="fixed inset-0 z-50 flex items-end"
+              style={{background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)'}}>
+              <div className="w-full rounded-t-3xl px-5 pt-4 pb-safe slide-up"
+                style={{background:'#0f1728', border:'1px solid rgba(255,255,255,0.1)', borderBottom:'none'}}>
+                <div className="drag-handle" />
+                <h2 className="text-white text-[18px] font-bold mb-1">{CAPTURE_MODES[cameraMode]?.label}</h2>
+                <p className="text-white/40 text-sm mb-5">Is this photo before or after treatment?</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => handleTypeChosen('pre')}
+                    className="py-6 rounded-2xl text-white font-bold text-lg flex flex-col items-center gap-2 active:scale-95 transition-transform"
+                    style={{background:'rgba(52,211,153,0.15)', border:'1px solid rgba(52,211,153,0.4)'}}>
+                    <span className="text-2xl">📸</span>
+                    <span className="text-emerald-300 font-bold">PRE</span>
+                    <span className="text-white/40 text-xs font-normal">Before treatment</span>
                   </button>
-                  <button
-                    onClick={() => handleTypeChosen('post')}
-                    className="py-6 bg-amber-600 rounded-2xl text-white font-bold text-lg flex flex-col items-center gap-2 active:scale-95 transition-transform"
-                  >
-                    <span className="text-3xl">✨</span>
-                    <span>POST</span>
-                    <span className="text-sm font-normal opacity-70">After treatment</span>
+                  <button onClick={() => handleTypeChosen('post')}
+                    className="py-6 rounded-2xl text-white font-bold text-lg flex flex-col items-center gap-2 active:scale-95 transition-transform"
+                    style={{background:'rgba(251,191,36,0.15)', border:'1px solid rgba(251,191,36,0.4)'}}>
+                    <span className="text-2xl">✨</span>
+                    <span className="text-amber-300 font-bold">POST</span>
+                    <span className="text-white/40 text-xs font-normal">After treatment</span>
                   </button>
                 </div>
-                <button
-                  onClick={() => setShowTypeModal(false)}
-                  className="mt-4 w-full py-3.5 bg-white/8 rounded-xl text-white/60 font-medium active:scale-98"
-                >
+                <button onClick={() => setShowTypeModal(false)}
+                  className="mt-3 mb-2 w-full py-3.5 rounded-xl text-white/55 font-medium active:scale-[0.98] btn-secondary">
                   Cancel
                 </button>
               </div>
@@ -3391,9 +3704,21 @@
 
       if (authLoading || (userStatus === 'approved' && syncStep && syncStep !== 'done')) {
         return (
-          <div className="h-full flex items-center justify-center bg-slate-900">
-            <div className="text-center space-y-3">
-              <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <div className="h-full flex items-center justify-center"
+            style={{background:'radial-gradient(ellipse at 30% 30%, rgba(99,102,241,0.12) 0%, transparent 55%), #080d1a'}}>
+            <div className="text-center space-y-4">
+              {/* Branded spinner */}
+              <div className="relative w-14 h-14 mx-auto">
+                <div className="absolute inset-0 rounded-full border-2 border-white/6" />
+                <div className="absolute inset-0 rounded-full border-2 border-t-indigo-500 border-r-transparent border-b-transparent border-l-transparent animate-spin" />
+                <div className="absolute inset-2 rounded-full flex items-center justify-center"
+                  style={{background:'rgba(99,102,241,0.15)'}}>
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <circle cx="9" cy="9" r="5" stroke="rgba(165,180,252,0.7)" strokeWidth="1.5" fill="none"/>
+                    <circle cx="9" cy="9" r="2" fill="rgba(165,180,252,0.8)"/>
+                  </svg>
+                </div>
+              </div>
               <p className="text-white/40 text-sm">
                 {authLoading ? 'Loading PhotoGuide…' : `Syncing ${syncLabel}…`}
               </p>
@@ -3406,38 +3731,51 @@
 
       if (userStatus === 'pending') {
         return (
-          <div className="h-full flex flex-col items-center justify-center bg-slate-900 px-6 text-center space-y-5">
-            <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center text-3xl">⏳</div>
-            <div className="space-y-2">
-              <h2 className="text-white text-xl font-bold">Awaiting Approval</h2>
-              <p className="text-white/50 text-sm leading-relaxed">
-                Your account is pending approval from the clinic administrator.
-                You'll be notified once access is granted.
-              </p>
-              <p className="text-white/30 text-xs mt-1">{user.email}</p>
+          <div className="h-full flex flex-col items-center justify-center px-6 text-center"
+            style={{background:'radial-gradient(ellipse at 50% 40%, rgba(251,191,36,0.08) 0%, transparent 60%), #080d1a'}}>
+            <div className="space-y-6">
+              <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto text-3xl"
+                style={{background:'rgba(251,191,36,0.1)', border:'1px solid rgba(251,191,36,0.25)', boxShadow:'0 0 40px rgba(251,191,36,0.1)'}}>
+                ⏳
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-white text-xl font-bold">Awaiting Approval</h2>
+                <p className="text-white/45 text-sm leading-relaxed max-w-xs mx-auto">
+                  Your account is pending approval from the clinic administrator. You'll be notified once access is granted.
+                </p>
+                <p className="text-white/25 text-xs mt-2">{user.email}</p>
+              </div>
+              <button
+                onClick={async () => { const a = await getFirebaseAuth(); a?.signOut(); }}
+                className="px-6 py-2.5 rounded-xl text-sm font-medium active:scale-95 transition-transform btn-secondary">
+                Sign Out
+              </button>
             </div>
-            <button
-              onClick={async () => { const a = await getFirebaseAuth(); a?.signOut(); }}
-              className="px-6 py-2.5 bg-white/8 rounded-xl text-white/60 text-sm font-medium active:scale-95"
-            >Sign Out</button>
           </div>
         );
       }
 
       if (userStatus === 'rejected') {
         return (
-          <div className="h-full flex flex-col items-center justify-center bg-slate-900 px-6 text-center space-y-5">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center text-3xl">🚫</div>
-            <div className="space-y-2">
-              <h2 className="text-white text-xl font-bold">Access Denied</h2>
-              <p className="text-white/50 text-sm leading-relaxed">
-                Your account has not been approved. Contact the clinic administrator.
-              </p>
+          <div className="h-full flex flex-col items-center justify-center px-6 text-center"
+            style={{background:'radial-gradient(ellipse at 50% 40%, rgba(239,68,68,0.07) 0%, transparent 60%), #080d1a'}}>
+            <div className="space-y-6">
+              <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto text-3xl"
+                style={{background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.25)', boxShadow:'0 0 40px rgba(239,68,68,0.08)'}}>
+                🚫
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-white text-xl font-bold">Access Denied</h2>
+                <p className="text-white/45 text-sm leading-relaxed max-w-xs mx-auto">
+                  Your account has not been approved. Please contact the clinic administrator for access.
+                </p>
+              </div>
+              <button
+                onClick={async () => { const a = await getFirebaseAuth(); a?.signOut(); }}
+                className="px-6 py-2.5 rounded-xl text-sm font-medium active:scale-95 transition-transform btn-secondary">
+                Sign Out
+              </button>
             </div>
-            <button
-              onClick={async () => { const a = await getFirebaseAuth(); a?.signOut(); }}
-              className="px-6 py-2.5 bg-white/8 rounded-xl text-white/60 text-sm font-medium active:scale-95"
-            >Sign Out</button>
           </div>
         );
       }
