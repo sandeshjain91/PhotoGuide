@@ -845,11 +845,15 @@
       const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
       const g  = 'rgba(253,200,50,';
       const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
+      /* Mirror all guide content for right profile so landmarks are correct
+         without needing to flip the live video preview. */
+      const flip = side === 'right' ? 'translate(100,0) scale(-1,1)' : '';
       return (
         <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
-          {/* ── Animated scan line ── */}
+          {/* ── Animated scan line (outside flip group — always left→right) ── */}
           <rect x="0" y="0" width="100" height="0.6"
             fill={`${c}0.35)`} className="guide-scanline" />
+          <g transform={flip}>
 
           {/* ── Vertical plumb line ── */}
           <line x1="50" y1="5" x2="50" y2="128"
@@ -900,6 +904,7 @@
             fill={`${c}0.7)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.5">
             {ready ? '✓ ' : ''}{side === 'left' ? 'LEFT' : 'RIGHT'} PROFILE
           </text>
+          </g>{/* end flip group */}
         </svg>
       );
     }
@@ -1511,16 +1516,7 @@
           canvas.height = h;
           const ctx = canvas.getContext('2d');
 
-          /*
-           * Right-profile mirror fix:
-           * The rear camera outputs a left-profile perspective when pointing
-           * to the patient's right. We flip horizontally so the stored image
-           * is anatomically correct (patient's right is on screen's right).
-           */
-          if (captureMode === 'right' || captureMode === 'right_buccal') {
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
-          }
+          /* No flip needed — video is never mirrored, raw frame is anatomically correct. */
           ctx.drawImage(video, 0, 0, w, h);
 
           canvas.toBlob((blob) => {
@@ -1590,9 +1586,7 @@
               ref={videoRef}
               className="w-full h-full object-cover"
               autoPlay playsInline muted
-              /* Mirror preview for right-profile so silhouette lines up visually.
-                 The canvas capture re-mirrors back to anatomically correct. */
-              style={{ transform: (captureMode === 'right' || captureMode === 'right_buccal') ? 'scaleX(-1)' : 'none' }}
+              style={{ transform: 'none' }}
             />
 
             {/* Hidden capture canvas */}
