@@ -78,6 +78,45 @@
     /* ── Silhouette SVG ─────────────────────────── */
     .silhouette { pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%; }
 
+    /* ── Guide overlay animations ─────────────────── */
+    @keyframes bracket-pulse {
+      0%, 100% { opacity: .80; filter: drop-shadow(0 0 3px rgba(99,210,255,.5)); }
+      50%       { opacity: 1;   filter: drop-shadow(0 0 8px rgba(99,210,255,.95)); }
+    }
+    @keyframes bracket-ready {
+      0%, 100% { opacity: .85; filter: drop-shadow(0 0 4px rgba(52,211,153,.6)); }
+      50%       { opacity: 1;   filter: drop-shadow(0 0 10px rgba(52,211,153,1)); }
+    }
+    @keyframes crosshair-pulse {
+      0%, 100% { opacity: .55; }
+      50%       { opacity: 1;   }
+    }
+    @keyframes crosshair-ready {
+      0%, 100% { opacity: .7;  filter: drop-shadow(0 0 4px rgba(52,211,153,.7)); }
+      50%       { opacity: 1;   filter: drop-shadow(0 0 10px rgba(52,211,153,1)); }
+    }
+    @keyframes frankfort-pulse {
+      0%, 100% { opacity: .75; filter: drop-shadow(0 0 2px rgba(253,200,50,.5)); }
+      50%       { opacity: 1;   filter: drop-shadow(0 0 6px rgba(253,200,50,.9)); }
+    }
+    @keyframes scanline {
+      0%   { transform: translateY(-5%); opacity: 0; }
+      8%   { opacity: .45; }
+      92%  { opacity: .45; }
+      100% { transform: translateY(105%); opacity: 0; }
+    }
+    @keyframes guide-breathe {
+      0%, 100% { opacity: .5; }
+      50%       { opacity: .9; }
+    }
+    .guide-brackets     { animation: bracket-pulse  2.8s ease-in-out infinite; }
+    .guide-brackets-rdy { animation: bracket-ready  1.8s ease-in-out infinite; }
+    .guide-crosshair    { animation: crosshair-pulse 2.2s ease-in-out infinite; }
+    .guide-crosshair-rdy{ animation: crosshair-ready 1.6s ease-in-out infinite; }
+    .guide-frankfort    { animation: frankfort-pulse 3s ease-in-out infinite; }
+    .guide-scanline     { animation: scanline 4s linear infinite; }
+    .guide-breathe      { animation: guide-breathe 3s ease-in-out infinite; }
+
     /* ── Scrollbar hide ─────────────────────────── */
     .no-scroll::-webkit-scrollbar { display: none; }
     .no-scroll { scrollbar-width: none; }
@@ -726,287 +765,330 @@
     }
 
     /* ── 3. FrontalGuide ────────────────────────────────────────────── */
-    /*
-     * Minimal geometric guide for frontal capture. No head silhouette —
-     * just composition lines the photographer aligns TO the patient:
-     *   • Gold eye-line at upper-third (where eyes should sit)
-     *   • Cyan vertical midline (symmetry)
-     *   • Subtle center crosshair (face center target)
-     *   • Rule-of-thirds intersection dots
-     *   • Corner framing brackets
-     */
-    function FrontalGuide() {
+    function FrontalGuide({ ready = false }) {
+      const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';  // cyan → emerald
+      const g  = ready ? 'rgba(253,200,50,' : 'rgba(253,200,50,';  // gold stays gold
+      const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
+      const xh = ready ? 'guide-crosshair-rdy' : 'guide-crosshair';
       return (
         <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
-          {/* ── Rule-of-thirds lines (very subtle) ── */}
-          <line x1="33.3" y1="5" x2="33.3" y2="128"
-            stroke="rgba(99,210,255,0.1)" strokeWidth="0.3" />
-          <line x1="66.6" y1="5" x2="66.6" y2="128"
-            stroke="rgba(99,210,255,0.1)" strokeWidth="0.3" />
-          <line x1="5" y1="44.3" x2="95" y2="44.3"
-            stroke="rgba(99,210,255,0.08)" strokeWidth="0.3" />
-          <line x1="5" y1="88.6" x2="95" y2="88.6"
-            stroke="rgba(99,210,255,0.08)" strokeWidth="0.3" />
+          {/* ── Animated scan line ── */}
+          <rect x="0" y="0" width="100" height="0.6"
+            fill={`${c}0.35)`} className="guide-scanline" />
 
-          {/* ── Thirds intersection dots ── */}
+          {/* ── Rule-of-thirds vertical lines ── */}
+          <line x1="33.3" y1="5" x2="33.3" y2="128"
+            stroke={`${c}0.28)`} strokeWidth="0.5" strokeDasharray="1.5,3" />
+          <line x1="66.6" y1="5" x2="66.6" y2="128"
+            stroke={`${c}0.28)`} strokeWidth="0.5" strokeDasharray="1.5,3" />
+
+          {/* ── Rule-of-thirds horizontal lines ── */}
+          <line x1="5" y1="44.3" x2="95" y2="44.3"
+            stroke={`${c}0.22)`} strokeWidth="0.45" strokeDasharray="1.5,3" />
+          <line x1="5" y1="88.6" x2="95" y2="88.6"
+            stroke={`${c}0.22)`} strokeWidth="0.45" strokeDasharray="1.5,3" />
+
+          {/* ── Thirds intersection diamonds ── */}
           {[[33.3,44.3],[66.6,44.3],[33.3,88.6],[66.6,88.6]].map(([cx,cy],i) => (
-            <circle key={i} cx={cx} cy={cy} r="1"
-              fill="rgba(99,210,255,0.15)" />
+            <g key={i}>
+              <circle cx={cx} cy={cy} r="1.4" fill={`${c}0.5)`} />
+              <circle cx={cx} cy={cy} r="2.8" fill="none" stroke={`${c}0.25)`} strokeWidth="0.4" />
+            </g>
           ))}
 
-          {/* ── Gold eye-line at upper third ── */}
-          <line x1="10" y1="44.3" x2="90" y2="44.3"
-            stroke="rgba(253,200,50,0.55)" strokeWidth="0.5" strokeDasharray="4,2.5" />
-          <text x="91" y="43.5"
-            fill="rgba(253,200,50,0.45)" fontSize="2.8" fontFamily="monospace"
-            dominantBaseline="middle">EYE</text>
+          {/* ── Gold eye-line (upper third) — bright & pulsing ── */}
+          <line x1="6" y1="44.3" x2="94" y2="44.3"
+            stroke={`${g}0.85)`} strokeWidth="0.8" strokeDasharray="5,2.5"
+            className="guide-frankfort" />
+          <text x="5" y="42.5"
+            fill={`${g}0.75)`} fontSize="3.2" fontFamily="monospace" fontWeight="bold">
+            ▶ EYE LINE
+          </text>
 
           {/* ── Vertical midline ── */}
-          <line x1="50" y1="8" x2="50" y2="125"
-            stroke="rgba(99,210,255,0.25)" strokeWidth="0.4" strokeDasharray="2,3" />
+          <line x1="50" y1="6" x2="50" y2="127"
+            stroke={`${c}0.5)`} strokeWidth="0.6" strokeDasharray="3,3" />
 
           {/* ── Center crosshair (face target) ── */}
-          <line x1="46" y1="55" x2="54" y2="55"
-            stroke="rgba(99,210,255,0.3)" strokeWidth="0.5" />
-          <line x1="50" y1="51" x2="50" y2="59"
-            stroke="rgba(99,210,255,0.3)" strokeWidth="0.5" />
-          <circle cx="50" cy="55" r="8"
-            fill="none" stroke="rgba(99,210,255,0.12)" strokeWidth="0.4" />
+          <g className={xh}>
+            <line x1="43" y1="55" x2="57" y2="55" stroke={`${c}0.9)`} strokeWidth="0.9" />
+            <line x1="50" y1="48" x2="50" y2="62" stroke={`${c}0.9)`} strokeWidth="0.9" />
+            <circle cx="50" cy="55" r="10"
+              fill="none" stroke={`${c}0.45)`} strokeWidth="0.6" />
+            <circle cx="50" cy="55" r="4"
+              fill="none" stroke={`${c}0.6)`} strokeWidth="0.5" />
+          </g>
 
-          {/* ── Corner alignment brackets ── */}
-          <path d="M 7 7 L 7 17 M 7 7 L 17 7"   stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          <path d="M 93 7 L 93 17 M 93 7 L 83 7" stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          <path d="M 7 126 L 7 116 M 7 126 L 17 126"   stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          <path d="M 93 126 L 93 116 M 93 126 L 83 126" stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
+          {/* ── Corner alignment brackets — animated ── */}
+          <g className={bk}>
+            <path d="M 6 6 L 6 19 M 6 6 L 19 6"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            <path d="M 94 6 L 94 19 M 94 6 L 81 6"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            <path d="M 6 127 L 6 114 M 6 127 L 19 127"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            <path d="M 94 127 L 94 114 M 94 127 L 81 127"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+          </g>
 
           {/* ── Label ── */}
           <text x="50" y="131" textAnchor="middle"
-            fill="rgba(99,210,255,0.35)" fontSize="3" fontFamily="monospace" letterSpacing="0.5">
-            FRONT
+            fill={`${c}0.65)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.8">
+            {ready ? '✓ FRONT' : 'FRONT'}
           </text>
         </svg>
       );
     }
 
     /* ── 4. ProfileGuide ────────────────────────────────────────────── */
-    /*
-     * Minimal profile guide — no head outline. Just the two critical
-     * references for standardised lateral photography:
-     *   • Gold Frankfort Horizontal Plane line (THE alignment standard)
-     *   • Cyan vertical plumb line (postural reference)
-     *   • Corner framing brackets
-     */
-    function ProfileGuide({ side = 'left' }) {
+    function ProfileGuide({ side = 'left', ready = false }) {
+      const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
+      const g  = 'rgba(253,200,50,';
+      const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
       return (
         <svg viewBox="0 0 100 133" className="silhouette" xmlns="http://www.w3.org/2000/svg">
+          {/* ── Animated scan line ── */}
+          <rect x="0" y="0" width="100" height="0.6"
+            fill={`${c}0.35)`} className="guide-scanline" />
+
           {/* ── Vertical plumb line ── */}
           <line x1="50" y1="5" x2="50" y2="128"
-            stroke="rgba(99,210,255,0.2)" strokeWidth="0.4" strokeDasharray="2,4" />
+            stroke={`${c}0.4)`} strokeWidth="0.6" strokeDasharray="3,4" />
 
-          {/* ── Frankfort Horizontal Plane (gold standard) ── */}
-          <line x1="8" y1="49" x2="92" y2="49"
-            stroke="rgba(253,200,50,0.7)" strokeWidth="0.55" strokeDasharray="4,2" />
-          <text x="10" y="46"
-            fill="rgba(253,200,50,0.55)" fontSize="2.8" fontFamily="monospace">
-            FRANKFORT PLANE
-          </text>
+          {/* ── Frankfort Horizontal Plane — gold, prominent, pulsing ── */}
+          <g className="guide-frankfort">
+            <line x1="5" y1="49" x2="95" y2="49"
+              stroke={`${g}0.9)`} strokeWidth="1.1" strokeDasharray="5,2.5" />
+            <text x="7" y="46.5"
+              fill={`${g}0.85)`} fontSize="3.4" fontFamily="monospace" fontWeight="bold">
+              ── FRANKFORT PLANE ──
+            </text>
+          </g>
 
-          {/* ── Tragus landmark (ear canal) ── */}
-          <circle cx="36" cy="49" r="1.8"
-            fill="none" stroke="rgba(253,200,50,0.6)" strokeWidth="0.5" />
-          <text x="36" y="54.5" textAnchor="middle"
-            fill="rgba(253,200,50,0.35)" fontSize="2" fontFamily="monospace">
-            TRAGUS
-          </text>
+          {/* ── Tragus landmark — bigger, glowing ── */}
+          <g className="guide-breathe">
+            <circle cx="32" cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
+            <text x="32" y="55.5" textAnchor="middle"
+              fill={`${g}0.75)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">TRAGUS</text>
+          </g>
 
-          {/* ── Orbital rim landmark ── */}
-          <circle cx="70" cy="49" r="1.8"
-            fill="none" stroke="rgba(253,200,50,0.6)" strokeWidth="0.5" />
-          <text x="70" y="54.5" textAnchor="middle"
-            fill="rgba(253,200,50,0.35)" fontSize="2" fontFamily="monospace">
-            ORBIT
-          </text>
+          {/* ── Orbital rim landmark — bigger, glowing ── */}
+          <g className="guide-breathe" style={{ animationDelay: '1.4s' }}>
+            <circle cx="72" cy="49" r="3" fill={`${g}0.2)`} stroke={`${g}0.9)`} strokeWidth="0.8" />
+            <text x="72" y="55.5" textAnchor="middle"
+              fill={`${g}0.75)`} fontSize="2.8" fontFamily="monospace" fontWeight="bold">ORBIT</text>
+          </g>
 
-          {/* ── Center crosshair ── */}
-          <line x1="47" y1="55" x2="53" y2="55"
-            stroke="rgba(99,210,255,0.25)" strokeWidth="0.4" />
-          <line x1="50" y1="52" x2="50" y2="58"
-            stroke="rgba(99,210,255,0.25)" strokeWidth="0.4" />
+          {/* ── Vertical plumb / midline ── */}
+          <line x1="50" y1="6" x2="50" y2="127"
+            stroke={`${c}0.45)`} strokeWidth="0.6" strokeDasharray="3,3" />
 
-          {/* ── Corner alignment brackets ── */}
-          <path d="M 7 7 L 7 17 M 7 7 L 17 7"   stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          <path d="M 93 7 L 93 17 M 93 7 L 83 7" stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          <path d="M 7 126 L 7 116 M 7 126 L 17 126"   stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
-          <path d="M 93 126 L 93 116 M 93 126 L 83 126" stroke="rgba(99,210,255,0.6)" strokeWidth="1.2" fill="none" strokeLinecap="round"/>
+          {/* ── Corner brackets ── */}
+          <g className={bk}>
+            <path d="M 6 6 L 6 19 M 6 6 L 19 6"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            <path d="M 94 6 L 94 19 M 94 6 L 81 6"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            <path d="M 6 127 L 6 114 M 6 127 L 19 127"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+            <path d="M 94 127 L 94 114 M 94 127 L 81 127"
+              stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+          </g>
 
           {/* ── Label ── */}
           <text x="50" y="131" textAnchor="middle"
-            fill="rgba(99,210,255,0.35)" fontSize="3" fontFamily="monospace" letterSpacing="0.3">
-            {side === 'left' ? 'LEFT' : 'RIGHT'} PROFILE
+            fill={`${c}0.7)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.5">
+            {ready ? '✓ ' : ''}{side === 'left' ? 'LEFT' : 'RIGHT'} PROFILE
           </text>
         </svg>
       );
     }
 
     /* ── 4b. Dental Silhouette Guides ────────────────────────────── */
+    /* Shared dental bracket corners */
+    function DentalBrackets({ ready = false }) {
+      const c  = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
+      const bk = ready ? 'guide-brackets-rdy' : 'guide-brackets';
+      return (
+        <g className={bk}>
+          <path d="M6,6 L6,19 M6,6 L19,6"   stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+          <path d="M94,6 L94,19 M94,6 L81,6" stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+          <path d="M6,127 L6,114 M6,127 L19,127"    stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+          <path d="M94,127 L94,114 M94,127 L81,127"  stroke={`${c}0.95)`} strokeWidth="2" fill="none" strokeLinecap="round"/>
+        </g>
+      );
+    }
 
-    function TeethFrontalSilhouette() {
+    function TeethFrontalSilhouette({ ready = false }) {
+      const c = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
+      const g = 'rgba(253,200,50,';
       return (
         <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-          {/* Lip outline (open smile shape) */}
-          <ellipse cx="50" cy="58" rx="32" ry="18"
-            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.6" strokeDasharray="2,1.5" />
-          {/* Upper lip contour */}
-          <path d="M22,55 Q36,48 50,50 Q64,48 78,55" fill="none" stroke="rgba(99,210,255,0.3)" strokeWidth="0.5" />
-          {/* Lower lip contour */}
-          <path d="M22,61 Q36,72 50,74 Q64,72 78,61" fill="none" stroke="rgba(99,210,255,0.3)" strokeWidth="0.5" />
+          {/* ── Scan line ── */}
+          <rect x="0" y="0" width="100" height="0.6" fill={`${c}0.4)`} className="guide-scanline" />
 
-          {/* Upper teeth arch */}
+          {/* ── Lip frame ellipse — prominent ── */}
+          <ellipse cx="50" cy="62" rx="35" ry="22"
+            fill="none" stroke={`${c}0.7)`} strokeWidth="1.2" strokeDasharray="3,2" />
+
+          {/* ── Upper lip curve ── */}
+          <path d="M18,58 Q36,47 50,50 Q64,47 82,58"
+            fill="none" stroke={`${c}0.6)`} strokeWidth="0.9" />
+          {/* ── Lower lip curve ── */}
+          <path d="M18,66 Q36,80 50,82 Q64,80 82,66"
+            fill="none" stroke={`${c}0.6)`} strokeWidth="0.9" />
+
+          {/* ── Upper teeth — brighter, filled hint ── */}
           {[-18,-13,-8.5,-4.5,0,4.5,8.5,13,18].map((x, i) => (
-            <rect key={`u${i}`} x={47.5 + x} y="51" width="4" height="6" rx="1"
-              fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+            <rect key={`u${i}`} x={47.5 + x} y="51" width="4.2" height="7" rx="1.2"
+              fill={`${c}0.08)`} stroke={`${c}0.75)`} strokeWidth="0.7" />
           ))}
-          {/* Lower teeth arch */}
+          {/* ── Lower teeth ── */}
           {[-16,-11.5,-7.5,-3.8,0,3.8,7.5,11.5,16].map((x, i) => (
-            <rect key={`l${i}`} x={47.8 + x} y="59" width="3.8" height="5.5" rx="1"
-              fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+            <rect key={`l${i}`} x={47.8 + x} y="60" width="4" height="6" rx="1.2"
+              fill={`${c}0.08)`} stroke={`${c}0.65)`} strokeWidth="0.7" />
           ))}
 
-          {/* Vertical midline */}
-          <line x1="50" y1="40" x2="50" y2="80" stroke="rgba(99,210,255,0.2)" strokeWidth="0.3" strokeDasharray="1.5,1" />
+          {/* ── Occlusal line (gold) ── */}
+          <line x1="28" y1="58" x2="72" y2="58"
+            stroke={`${g}0.85)`} strokeWidth="0.9" strokeDasharray="3,1.5" className="guide-frankfort" />
 
-          {/* Corner brackets */}
-          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
+          {/* ── Vertical dental midline ── */}
+          <line x1="50" y1="38" x2="50" y2="86"
+            stroke={`${c}0.6)`} strokeWidth="0.7" strokeDasharray="2,2" />
 
-          {/* Label */}
-          <text x="50" y="124" textAnchor="middle"
-            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
-            TEETH FRONT · ALIGN SMILE TO GUIDE
+          <DentalBrackets ready={ready} />
+
+          <text x="50" y="131" textAnchor="middle"
+            fill={`${c}0.8)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.3">
+            {ready ? '✓ ' : ''}TEETH FRONT · ALIGN SMILE
           </text>
         </svg>
       );
     }
 
-    function UpperArchSilhouette() {
+    function UpperArchSilhouette({ ready = false }) {
+      const c = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
       return (
         <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-          {/* Palatal horseshoe outline */}
-          <path d="M28,85 Q28,30 50,25 Q72,30 72,85"
-            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.7" strokeDasharray="2,1.5" />
-          {/* Inner arch */}
-          <path d="M35,80 Q35,42 50,38 Q65,42 65,80"
-            fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+          <rect x="0" y="0" width="100" height="0.6" fill={`${c}0.4)`} className="guide-scanline" />
 
-          {/* Tooth positions along the arch */}
+          {/* ── Outer arch — bright ── */}
+          <path d="M25,88 Q25,25 50,20 Q75,25 75,88"
+            fill="none" stroke={`${c}0.8)`} strokeWidth="1.3" strokeDasharray="3,2" />
+          {/* ── Inner arch ── */}
+          <path d="M33,83 Q33,40 50,35 Q67,40 67,83"
+            fill="none" stroke={`${c}0.45)`} strokeWidth="0.8" strokeDasharray="2,2" />
+          {/* ── Arch fill ── */}
+          <path d="M25,88 Q25,25 50,20 Q75,25 75,88 L67,83 Q67,40 50,35 Q33,40 33,83 Z"
+            fill={`${c}0.05)`} />
+
+          {/* ── Tooth positions ── */}
           {[
-            [30,78],[29,72],[28,65],[28.5,58],[30,52],[33,46],[37,41],[42,37],[50,35],
-            [58,37],[63,41],[67,46],[70,52],[71.5,58],[72,65],[71,72],[70,78]
+            [27,82],[26,75],[25,67],[25.5,59],[27,52],[30,46],[34,40],[40,35],[50,32],
+            [60,35],[66,40],[70,46],[73,52],[74.5,59],[75,67],[74,75],[73,82]
           ].map(([cx,cy], i) => (
-            <circle key={i} cx={cx} cy={cy} r="2.2"
-              fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.4" />
+            <circle key={i} cx={cx} cy={cy} r="2.8"
+              fill={`${c}0.12)`} stroke={`${c}0.7)`} strokeWidth="0.65" />
           ))}
 
-          {/* Midline */}
-          <line x1="50" y1="20" x2="50" y2="90" stroke="rgba(99,210,255,0.2)" strokeWidth="0.3" strokeDasharray="1.5,1" />
+          {/* ── Midline ── */}
+          <line x1="50" y1="15" x2="50" y2="95"
+            stroke={`${c}0.55)`} strokeWidth="0.7" strokeDasharray="2,2" />
 
-          {/* Corner brackets */}
-          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-
-          <text x="50" y="124" textAnchor="middle"
-            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
-            UPPER ARCH · OCCLUSAL VIEW
+          <DentalBrackets ready={ready} />
+          <text x="50" y="131" textAnchor="middle"
+            fill={`${c}0.8)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.3">
+            {ready ? '✓ ' : ''}UPPER ARCH · OCCLUSAL VIEW
           </text>
         </svg>
       );
     }
 
-    function LowerArchSilhouette() {
+    function LowerArchSilhouette({ ready = false }) {
+      const c = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
       return (
         <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-          {/* Mandibular horseshoe (inverted, narrower) */}
-          <path d="M30,40 Q30,90 50,95 Q70,90 70,40"
-            fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.7" strokeDasharray="2,1.5" />
-          {/* Inner arch */}
-          <path d="M37,43 Q37,82 50,86 Q63,82 63,43"
-            fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+          <rect x="0" y="0" width="100" height="0.6" fill={`${c}0.4)`} className="guide-scanline" />
 
-          {/* Tooth positions */}
+          {/* ── Outer arch ── */}
+          <path d="M25,38 Q25,100 50,105 Q75,100 75,38"
+            fill="none" stroke={`${c}0.8)`} strokeWidth="1.3" strokeDasharray="3,2" />
+          {/* ── Inner arch ── */}
+          <path d="M33,40 Q33,90 50,94 Q67,90 67,40"
+            fill="none" stroke={`${c}0.45)`} strokeWidth="0.8" strokeDasharray="2,2" />
+          {/* ── Arch fill ── */}
+          <path d="M25,38 Q25,100 50,105 Q75,100 75,38 L67,40 Q67,90 50,94 Q33,90 33,40 Z"
+            fill={`${c}0.05)`} />
+
+          {/* ── Tooth positions ── */}
           {[
-            [32,45],[31,51],[31,57],[31.5,63],[33,69],[36,75],[40,80],[45,84],[50,86],
-            [55,84],[60,80],[64,75],[67,69],[68.5,63],[69,57],[69,51],[68,45]
+            [27,44],[26,51],[25,59],[25.5,67],[27,74],[30,80],[34,86],[40,91],[50,93],
+            [60,91],[66,86],[70,80],[73,74],[74.5,67],[75,59],[74,51],[73,44]
           ].map(([cx,cy], i) => (
-            <circle key={i} cx={cx} cy={cy} r="2.2"
-              fill="none" stroke="rgba(99,210,255,0.35)" strokeWidth="0.4" />
+            <circle key={i} cx={cx} cy={cy} r="2.8"
+              fill={`${c}0.12)`} stroke={`${c}0.7)`} strokeWidth="0.65" />
           ))}
 
-          {/* Midline */}
-          <line x1="50" y1="35" x2="50" y2="100" stroke="rgba(99,210,255,0.2)" strokeWidth="0.3" strokeDasharray="1.5,1" />
+          {/* ── Midline ── */}
+          <line x1="50" y1="32" x2="50" y2="108"
+            stroke={`${c}0.55)`} strokeWidth="0.7" strokeDasharray="2,2" />
 
-          {/* Corner brackets */}
-          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-
-          <text x="50" y="124" textAnchor="middle"
-            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
-            LOWER ARCH · OCCLUSAL VIEW
+          <DentalBrackets ready={ready} />
+          <text x="50" y="131" textAnchor="middle"
+            fill={`${c}0.8)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.3">
+            {ready ? '✓ ' : ''}LOWER ARCH · OCCLUSAL VIEW
           </text>
         </svg>
       );
     }
 
-    function BuccalSilhouette({ side = 'left' }) {
+    function BuccalSilhouette({ side = 'left', ready = false }) {
       const isRight = side === 'right';
+      const c = ready ? 'rgba(52,211,153,' : 'rgba(99,210,255,';
+      const g = 'rgba(253,200,50,';
       return (
         <svg viewBox="0 0 100 133" className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+          <rect x="0" y="0" width="100" height="0.6" fill={`${c}0.4)`} className="guide-scanline" />
           <g transform={isRight ? 'translate(100,0) scale(-1,1)' : ''}>
-            {/* Cheek retractor outline */}
-            <path d="M15,40 Q12,55 15,70 Q20,75 25,70 L25,42 Q20,37 15,40 Z"
-              fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
-            <path d="M80,40 Q83,55 80,70 Q75,75 70,70 L70,42 Q75,37 80,40 Z"
-              fill="none" stroke="rgba(99,210,255,0.2)" strokeWidth="0.5" strokeDasharray="1.5,1" />
+            {/* ── Cheek retractor outline — visible ── */}
+            <path d="M14,38 Q10,55 14,72 Q20,78 26,72 L26,40 Q20,34 14,38 Z"
+              fill={`${c}0.06)`} stroke={`${c}0.55)`} strokeWidth="0.9" strokeDasharray="2,1.5" />
+            <path d="M82,38 Q86,55 82,72 Q76,78 70,72 L70,40 Q76,34 82,38 Z"
+              fill={`${c}0.06)`} stroke={`${c}0.55)`} strokeWidth="0.9" strokeDasharray="2,1.5" />
 
-            {/* Upper teeth row (lateral view) */}
-            <path d="M28,50 L72,50" stroke="rgba(99,210,255,0.3)" strokeWidth="0.4" />
-            {[30,36,42,48,54,60,66].map((x, i) => (
-              <rect key={`u${i}`} x={x} y="44" width="5" height="6" rx="1"
-                fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+            {/* ── Upper teeth gum line ── */}
+            <path d="M26,50 L70,50" stroke={`${c}0.5)`} strokeWidth="0.7" />
+            {[29,35,41,47,53,59,65].map((x, i) => (
+              <rect key={`u${i}`} x={x} y="43" width="5.5" height="7" rx="1.2"
+                fill={`${c}0.1)`} stroke={`${c}0.75)`} strokeWidth="0.75" />
             ))}
 
-            {/* Lower teeth row */}
-            <path d="M28,62 L72,62" stroke="rgba(99,210,255,0.3)" strokeWidth="0.4" />
-            {[30,36,42,48,54,60,66].map((x, i) => (
-              <rect key={`l${i}`} x={x} y="62" width="5" height="5.5" rx="1"
-                fill="none" stroke="rgba(99,210,255,0.4)" strokeWidth="0.4" />
+            {/* ── Lower teeth gum line ── */}
+            <path d="M26,63 L70,63" stroke={`${c}0.5)`} strokeWidth="0.7" />
+            {[29,35,41,47,53,59,65].map((x, i) => (
+              <rect key={`l${i}`} x={x} y="63" width="5.5" height="6.5" rx="1.2"
+                fill={`${c}0.1)`} stroke={`${c}0.65)`} strokeWidth="0.75" />
             ))}
 
-            {/* Occlusion line */}
-            <line x1="25" y1="56" x2="75" y2="56"
-              stroke="rgba(255,215,0,0.4)" strokeWidth="0.5" strokeDasharray="2,1" />
+            {/* ── Occlusal line — gold, pulsing ── */}
+            <line x1="24" y1="57" x2="76" y2="57"
+              stroke={`${g}0.9)`} strokeWidth="1.1" strokeDasharray="3,1.5"
+              className="guide-frankfort" />
+            <text x="78" y="57.5" dominantBaseline="middle"
+              fill={`${g}0.7)`} fontSize="2.8" fontFamily="monospace">OCC</text>
 
-            {/* Molar emphasis (posterior) */}
-            <rect x="62" y="43" width="10" height="7" rx="1.5"
-              fill="none" stroke="rgba(99,210,255,0.5)" strokeWidth="0.5" />
-            <rect x="62" y="61" width="10" height="7" rx="1.5"
-              fill="none" stroke="rgba(99,210,255,0.5)" strokeWidth="0.5" />
+            {/* ── Molar emphasis ── */}
+            <rect x="61" y="42" width="11" height="8.5" rx="2"
+              fill={`${c}0.15)`} stroke={`${c}0.85)`} strokeWidth="1" />
+            <rect x="61" y="62" width="11" height="8" rx="2"
+              fill={`${c}0.15)`} stroke={`${c}0.85)`} strokeWidth="1" />
           </g>
 
-          {/* Corner brackets */}
-          <path d="M8,8 L8,20 M8,8 L20,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,8 L92,20 M92,8 L80,8" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M8,125 L8,113 M8,125 L20,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-          <path d="M92,125 L92,113 M92,125 L80,125" stroke="rgba(99,210,255,0.25)" strokeWidth="0.7" fill="none" />
-
-          <text x="50" y="124" textAnchor="middle"
-            fill="rgba(99,210,255,0.55)" fontSize="3.5" fontFamily="monospace" letterSpacing="0.3">
-            {isRight ? 'RIGHT' : 'LEFT'} BUCCAL · ALIGN TEETH TO GUIDE
+          <DentalBrackets ready={ready} />
+          <text x="50" y="131" textAnchor="middle"
+            fill={`${c}0.8)`} fontSize="3.5" fontFamily="monospace" fontWeight="bold" letterSpacing="0.3">
+            {ready ? '✓ ' : ''}{isRight ? 'RIGHT' : 'LEFT'} BUCCAL
           </text>
         </svg>
       );
@@ -1483,14 +1565,14 @@
       const modeCfg    = CAPTURE_MODES[captureMode];
 
       const SILHOUETTE_MAP = {
-        front:        () => <FrontalGuide />,
-        left:         () => <ProfileGuide side="left" />,
-        right:        () => <ProfileGuide side="right" />,
-        teeth_front:  () => <TeethFrontalSilhouette />,
-        upper_arch:   () => <UpperArchSilhouette />,
-        lower_arch:   () => <LowerArchSilhouette />,
-        left_buccal:  () => <BuccalSilhouette side="left" />,
-        right_buccal: () => <BuccalSilhouette side="right" />,
+        front:        () => <FrontalGuide         ready={captureReady} />,
+        left:         () => <ProfileGuide         side="left"  ready={captureReady} />,
+        right:        () => <ProfileGuide         side="right" ready={captureReady} />,
+        teeth_front:  () => <TeethFrontalSilhouette             ready={captureReady} />,
+        upper_arch:   () => <UpperArchSilhouette               ready={captureReady} />,
+        lower_arch:   () => <LowerArchSilhouette               ready={captureReady} />,
+        left_buccal:  () => <BuccalSilhouette     side="left"  ready={captureReady} />,
+        right_buccal: () => <BuccalSilhouette     side="right" ready={captureReady} />,
       };
       const renderSilhouette = SILHOUETTE_MAP[captureMode] || (() => null);
 
