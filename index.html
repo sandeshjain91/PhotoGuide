@@ -129,6 +129,9 @@
     const JPEG_QUALITY  = 0.82;
     const MAX_DIMENSION = 2048;
 
+    /* Admin email — only this user can approve new accounts */
+    const ADMIN_EMAIL = 'sandeshjain91@gmail.com';
+
     /* Firebase config (hardcoded for clinic) */
     const FIREBASE_CONFIG = {
       apiKey: "AIzaSyBUpmDrGHAB7WL32yTqms1dAYC_7dn9KCs",
@@ -2291,13 +2294,35 @@
       const [storageUsed,  setStorageUsed]  = useState(null);
       const [signingIn,    setSigningIn]    = useState(false);
 
-      /* Firebase sync status (hardcoded config, no user input needed) */
+      /* Firebase sync status */
       const [fbSyncPending,  setFbSyncPending]  = useState(0);
       const [fbSyncErrors,   setFbSyncErrors]   = useState(0);
       const [fbInitialSync,  setFbInitialSync]  = useState(false);
 
+      /* Admin user management */
+      const [currentUserEmail, setCurrentUserEmail] = useState('');
+      const [isAdmin,          setIsAdmin]          = useState(false);
+      const [pendingUsers,     setPendingUsers]     = useState([]);
+      const [allUsers,         setAllUsers]         = useState([]);
+
+      const loadUsers = async () => {
+        const fb = await getFirebase();
+        if (!fb) return;
+        const snap = await fb.db.collection('users').get();
+        const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+        setPendingUsers(users.filter(u => u.status === 'pending'));
+        setAllUsers(users);
+      };
+
       useEffect(() => {
         (async () => {
+          const auth = await getFirebaseAuth();
+          const currentUser = auth?.currentUser;
+          const email = currentUser?.email || '';
+          setCurrentUserEmail(email);
+          const admin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+          setIsAdmin(admin);
+
           const cid = await DB.getSetting('googleClientId');
           const en  = await DB.getSetting('driveEnabled');
           const em  = await DB.getSetting('driveEmail');
@@ -2310,7 +2335,6 @@
           setPendingCount(pq.length);
           setErrorCount(eq.length);
 
-          /* Firebase status */
           const fbp = await DB.getFirebaseQueue('pending');
           const fbe = await DB.getFirebaseQueue('error');
           setFbSyncPending(fbp.length);
@@ -2320,8 +2344,33 @@
             const est = await navigator.storage.estimate();
             setStorageUsed(est);
           }
+
+          if (admin) await loadUsers();
         })();
       }, []);
+
+      const handleApproveUser = async (uid) => {
+        const fb = await getFirebase();
+        if (!fb) return;
+        await fb.db.collection('users').doc(uid).update({ status: 'approved' });
+        await loadUsers();
+      };
+
+      const handleRejectUser = async (uid) => {
+        if (!confirm('Reject this user? They will not be able to access the app.')) return;
+        const fb = await getFirebase();
+        if (!fb) return;
+        await fb.db.collection('users').doc(uid).update({ status: 'rejected' });
+        await loadUsers();
+      };
+
+      const handleRevokeUser = async (uid, email) => {
+        if (!confirm(`Revoke access for ${email}?`)) return;
+        const fb = await getFirebase();
+        if (!fb) return;
+        await fb.db.collection('users').doc(uid).update({ status: 'rejected' });
+        await loadUsers();
+      };
 
       const saveClientId = async () => {
         await DB.setSetting('googleClientId', clientId.trim());
@@ -2436,6 +2485,75 @@
 
           <div className="flex-1 overflow-y-auto no-scroll px-4 py-5 space-y-6">
 
+            {/* Signed-in user info */}
+            <div className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-white/40 text-xs">Signed in as</p>
+                <p className="text-white text-sm font-medium">{currentUserEmail}</p>
+                {isAdmin && <span className="text-amber-400 text-[10px] font-bold">ADMINISTRATOR</span>}
+              </div>
+              <button onClick={handleLogout}
+                className="px-3 py-1.5 bg-red-600/20 border border-red-500/40 rounded-lg text-red-400 text-xs font-bold active:scale-95"
+              >Sign Out</button>
+            </div>
+
+            {/* Admin: User Approvals */}
+            {isAdmin && (
+              <div className="bg-white/5 border border-amber-500/30 rounded-2xl p-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">👥</span>
+                  <h2 className="text-white font-bold text-base">Staff Access</h2>
+                  {pendingUsers.length > 0 && (
+                    <span className="ml-auto px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 rounded-full text-amber-400 text-[10px] font-bold">
+                      {pendingUsers.length} PENDING
+                    </span>
+                  )}
+                </div>
+
+                {/* Pending approvals */}
+                {pendingUsers.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-white/50 text-xs font-bold uppercase tracking-wide">Awaiting Approval</p>
+                    {pendingUsers.map(u => (
+                      <div key={u.uid} className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2.5 flex items-center justify-between">
+                        <p className="text-white/80 text-sm truncate flex-1 mr-2">{u.email}</p>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button onClick={() => handleApproveUser(u.uid)}
+                            className="px-3 py-1.5 bg-emerald-600 rounded-lg text-white text-xs font-bold active:scale-95"
+                          >Approve</button>
+                          <button onClick={() => handleRejectUser(u.uid)}
+                            className="px-3 py-1.5 bg-red-600/80 rounded-lg text-white text-xs font-bold active:scale-95"
+                          >Reject</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* All approved staff */}
+                {allUsers.filter(u => u.status === 'approved' && u.email !== ADMIN_EMAIL).length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-white/50 text-xs font-bold uppercase tracking-wide">Approved Staff</p>
+                    {allUsers.filter(u => u.status === 'approved' && u.email !== ADMIN_EMAIL).map(u => (
+                      <div key={u.uid} className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5 flex items-center justify-between">
+                        <div>
+                          <p className="text-white/80 text-sm">{u.email}</p>
+                          <p className="text-emerald-400 text-[10px]">✓ Access granted</p>
+                        </div>
+                        <button onClick={() => handleRevokeUser(u.uid, u.email)}
+                          className="px-3 py-1.5 bg-white/8 rounded-lg text-red-400/70 text-xs active:scale-95"
+                        >Revoke</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {pendingUsers.length === 0 && allUsers.filter(u => u.status === 'approved' && u.email !== ADMIN_EMAIL).length === 0 && (
+                  <p className="text-white/30 text-sm text-center py-2">No staff accounts yet</p>
+                )}
+              </div>
+            )}
+
             {/* Firebase Cloud Storage (Hardcoded) */}
             <div className="bg-white/5 border border-orange-500/30 rounded-2xl p-4 space-y-4">
               <div className="flex items-center gap-2">
@@ -2534,12 +2652,6 @@
               <p className="text-white/30 text-xs">Photos stored locally on this device via IndexedDB</p>
             </div>
 
-            {/* Sign Out */}
-            <button onClick={handleLogout}
-              className="w-full py-3 bg-red-600/20 border border-red-500/40 rounded-xl text-red-400 font-bold text-sm active:scale-95"
-            >
-              Sign Out
-            </button>
           </div>
         </div>
       );
@@ -2563,16 +2675,27 @@
           if (!auth) throw new Error('Auth not available');
 
           if (isRegister) {
-            await auth.createUserWithEmailAndPassword(email, password);
+            const cred = await auth.createUserWithEmailAndPassword(email, password);
+            /* Write user record — admin is auto-approved, everyone else is pending */
+            const fb = await getFirebase();
+            if (fb) {
+              const isAdmin = email.trim().toLowerCase() === ADMIN_EMAIL.toLowerCase();
+              await fb.db.collection('users').doc(cred.user.uid).set({
+                email:     email.trim().toLowerCase(),
+                status:    isAdmin ? 'approved' : 'pending',
+                role:      isAdmin ? 'admin' : 'staff',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+              });
+            }
           } else {
             await auth.signInWithEmailAndPassword(email, password);
           }
         } catch (err) {
           const msg = err.message || String(err);
-          if (msg.includes('already-exists')) setError('Email already registered. Sign in instead.');
-          else if (msg.includes('user-not-found')) setError('Email not found. Register first.');
-          else if (msg.includes('wrong-password')) setError('Incorrect password.');
-          else setError(msg.slice(0, 60));
+          if (msg.includes('already-in-use'))  setError('Email already registered. Sign in instead.');
+          else if (msg.includes('user-not-found') || msg.includes('no user')) setError('Email not found. Register first.');
+          else if (msg.includes('wrong-password') || msg.includes('invalid-credential')) setError('Incorrect password.');
+          else setError(msg.slice(0, 80));
         }
         setLoading(false);
       };
@@ -2636,7 +2759,9 @@
             {/* Info */}
             <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-center">
               <p className="text-white/40 text-xs leading-relaxed">
-                For security, clinic staff must register with email and password. Only authorized users can access patient data.
+                {isRegister
+                  ? 'New accounts require approval from the clinic administrator before access is granted.'
+                  : 'Only approved clinic staff can access patient data.'}
               </p>
             </div>
           </div>
@@ -2938,19 +3063,44 @@
 
     /* ── 15. AppContainer (Auth State) ────────────────────────────── */
     function AppContainer() {
-      const [user,       setUser]       = useState(null);
+      const [user,        setUser]        = useState(null);
+      const [userStatus,  setUserStatus]  = useState(null); // 'approved'|'pending'|'rejected'|null
       const [authLoading, setAuthLoading] = useState(true);
+
+      const checkUserStatus = async (firebaseUser) => {
+        if (!firebaseUser) { setUser(null); setUserStatus(null); setAuthLoading(false); return; }
+        try {
+          const fb = await getFirebase();
+          if (!fb) { /* Offline — let approved users in by caching status */ setUser(firebaseUser); setUserStatus('approved'); setAuthLoading(false); return; }
+          const doc = await fb.db.collection('users').doc(firebaseUser.uid).get();
+          if (!doc.exists) {
+            /* User registered before this system — auto-approve admin, pending others */
+            const isAdmin = firebaseUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+            const status  = isAdmin ? 'approved' : 'pending';
+            await fb.db.collection('users').doc(firebaseUser.uid).set({
+              email: firebaseUser.email, status, role: isAdmin ? 'admin' : 'staff',
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            });
+            setUserStatus(status);
+          } else {
+            setUserStatus(doc.data().status || 'pending');
+          }
+          setUser(firebaseUser);
+        } catch (err) {
+          console.error('Status check error:', err);
+          /* On error (offline), allow in so app remains usable */
+          setUser(firebaseUser);
+          setUserStatus('approved');
+        }
+        setAuthLoading(false);
+      };
 
       useEffect(() => {
         (async () => {
           try {
             const auth = await getFirebaseAuth();
             if (!auth) { setAuthLoading(false); return; }
-
-            auth.onAuthStateChanged((currentUser) => {
-              setUser(currentUser);
-              setAuthLoading(false);
-            });
+            auth.onAuthStateChanged(checkUserStatus);
           } catch (err) {
             console.error('Auth init error:', err);
             setAuthLoading(false);
@@ -2962,14 +3112,54 @@
         return (
           <div className="h-full flex items-center justify-center bg-slate-900">
             <div className="text-center space-y-3">
-              <div className="w-12 h-12 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+              <div className="w-10 h-10 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
               <p className="text-white/40 text-sm">Loading PhotoGuide…</p>
             </div>
           </div>
         );
       }
 
-      return user ? <App /> : <LoginScreen />;
+      if (!user) return <LoginScreen />;
+
+      if (userStatus === 'pending') {
+        return (
+          <div className="h-full flex flex-col items-center justify-center bg-slate-900 px-6 text-center space-y-5">
+            <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center text-3xl">⏳</div>
+            <div className="space-y-2">
+              <h2 className="text-white text-xl font-bold">Awaiting Approval</h2>
+              <p className="text-white/50 text-sm leading-relaxed">
+                Your account is pending approval from the clinic administrator.
+                You'll be notified once access is granted.
+              </p>
+              <p className="text-white/30 text-xs mt-1">{user.email}</p>
+            </div>
+            <button
+              onClick={async () => { const a = await getFirebaseAuth(); a?.signOut(); }}
+              className="px-6 py-2.5 bg-white/8 rounded-xl text-white/60 text-sm font-medium active:scale-95"
+            >Sign Out</button>
+          </div>
+        );
+      }
+
+      if (userStatus === 'rejected') {
+        return (
+          <div className="h-full flex flex-col items-center justify-center bg-slate-900 px-6 text-center space-y-5">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center text-3xl">🚫</div>
+            <div className="space-y-2">
+              <h2 className="text-white text-xl font-bold">Access Denied</h2>
+              <p className="text-white/50 text-sm leading-relaxed">
+                Your account has not been approved. Contact the clinic administrator.
+              </p>
+            </div>
+            <button
+              onClick={async () => { const a = await getFirebaseAuth(); a?.signOut(); }}
+              className="px-6 py-2.5 bg-white/8 rounded-xl text-white/60 text-sm font-medium active:scale-95"
+            >Sign Out</button>
+          </div>
+        );
+      }
+
+      return <App />;
     }
 
     /* ── Mount ─────────────────────────────────────────────────────── */
