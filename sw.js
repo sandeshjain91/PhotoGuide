@@ -3,8 +3,8 @@
  * Provides offline capability and resource caching for the Clinical Photography PWA.
  */
 
-const CACHE_VERSION = 'photoguide-v6';
-const RUNTIME_CACHE = 'photoguide-runtime-v6';
+const CACHE_VERSION = 'photoguide-v7';
+const RUNTIME_CACHE = 'photoguide-runtime-v7';
 
 // Resources to pre-cache on install (app shell)
 const PRECACHE_URLS = [
