@@ -473,6 +473,46 @@
         ?.setAttribute('content', metaColors[id] || '#ffffff');
     }
 
+    /* Theme-aware avatar colour palettes */
+    const AVATAR_GRADIENTS = {
+      'clean-bright': [
+        ['#2563eb', '#3b82f6'],  // blue
+        ['#0ea5e9', '#2563eb'],  // cyan→blue
+        ['#059669', '#10b981'],  // emerald
+        ['#f59e0b', '#ef4444'],  // amber→red
+        ['#ec4899', '#8b5cf6'],  // pink→purple
+        ['#14b8a6', '#0ea5e9'],  // teal→cyan
+        ['#f97316', '#ec4899'],  // orange→pink
+        ['#84cc16', '#14b8a6'],  // lime→teal
+      ],
+      'dark-blue': [
+        ['#38bdf8', '#0ea5e9'],  // bright cyan
+        ['#06b6d4', '#0891b2'],  // bright teal
+        ['#10b981', '#059669'],  // bright green
+        ['#fbbf24', '#f59e0b'],  // bright amber
+        ['#f87171', '#ef4444'],  // bright red
+        ['#a78bfa', '#d8b4fe'],  // bright purple
+        ['#fb923c', '#f97316'],  // bright orange
+        ['#84cc16', '#65a30d'],  // bright lime
+      ],
+      'calm-modern': [
+        ['#047857', '#059669'],  // forest green
+        ['#0891b2', '#0e7490'],  // teal
+        ['#7c3aed', '#6d28d9'],  // soft purple
+        ['#d97706', '#b45309'],  // warm amber
+        ['#dc2626', '#b91c1c'],  // soft red
+        ['#e879f9', '#d946ef'],  // soft pink
+        ['#92400e', '#78350f'],  // warm brown
+        ['#4b5563', '#374151'],  // slate
+      ],
+    };
+
+    function getAvatarGradForTheme(name) {
+      const theme = document.documentElement.dataset.theme || 'clean-bright';
+      const palette = AVATAR_GRADIENTS[theme] || AVATAR_GRADIENTS['clean-bright'];
+      return palette[name.charCodeAt(0) % palette.length];
+    }
+
     /*
      * Lazy-load TF.js + BlazeFace from local bundles (fallback for iOS/Safari
      * where the native FaceDetector API is unavailable).
@@ -2411,13 +2451,7 @@
         both:   { bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', text: '#d8b4fe', accent: '#d8b4fe' },
       };
 
-      /* Patient avatar gradient (same palette as list) */
-      const AVATAR_GRAD2 = [
-        ['#6366f1','#8b5cf6'], ['#0ea5e9','#6366f1'], ['#10b981','#059669'],
-        ['#f59e0b','#ef4444'], ['#ec4899','#8b5cf6'], ['#14b8a6','#0ea5e9'],
-        ['#f97316','#ec4899'], ['#84cc16','#14b8a6'],
-      ];
-      const [ac1, ac2] = AVATAR_GRAD2[patient.name.charCodeAt(0) % AVATAR_GRAD2.length];
+      const [ac1, ac2] = getAvatarGradForTheme(patient.name);
 
       return (
         <div className="flex flex-col h-full" style={{background:'var(--pg-bg)'}}>
@@ -2816,12 +2850,7 @@
       );
 
       /* Avatar gradient palette — deterministic based on name initial */
-      const AVATAR_GRAD = [
-        ['#6366f1','#8b5cf6'], ['#0ea5e9','#6366f1'], ['#10b981','#059669'],
-        ['#f59e0b','#ef4444'], ['#ec4899','#8b5cf6'], ['#14b8a6','#0ea5e9'],
-        ['#f97316','#ec4899'], ['#84cc16','#14b8a6'],
-      ];
-      const avatarGrad = (name) => AVATAR_GRAD[name.charCodeAt(0) % AVATAR_GRAD.length];
+      const avatarGrad = getAvatarGradForTheme;
 
       return (
         <div className="flex flex-col h-full" style={{background:'var(--pg-bg)'}}>
