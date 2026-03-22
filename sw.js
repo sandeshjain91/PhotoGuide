@@ -3,8 +3,8 @@
  * Provides offline capability and resource caching for the Clinical Photography PWA.
  */
 
-const CACHE_VERSION = 'photoguide-v2';
-const RUNTIME_CACHE = 'photoguide-runtime-v2';
+const CACHE_VERSION = 'photoguide-v3';
+const RUNTIME_CACHE = 'photoguide-runtime-v3';
 
 // Resources to pre-cache on install (app shell)
 const PRECACHE_URLS = [
@@ -20,10 +20,6 @@ const CDN_PATTERNS = [
   'unpkg.com/react-dom',
   'unpkg.com/@babel/standalone',
   'accounts.google.com/gsi',
-  'cdn.jsdelivr.net/npm/@tensorflow',
-  'cdn.jsdelivr.net/npm/@tensorflow-models/blazeface',
-  'tfhub.dev',
-  'storage.googleapis.com/tfjs-models',
 ];
 
 // ─── Install ───────────────────────────────────────────────────────────────
