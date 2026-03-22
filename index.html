@@ -2490,9 +2490,9 @@
       };
 
       const CATEGORY_CONFIG = {
-        dental: { label: 'Dental', color: '#f43f5e', bg: 'rgba(244,63,94,0.15)', border: 'rgba(244,63,94,0.4)' },
-        face:   { label: 'Face',   color: '#a5b4fc', bg: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)' },
-        both:   { label: 'Both',   color: '#d8b4fe', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.4)' },
+        dental: { label: 'Dental', color: '#e11d48', bg: 'rgba(244,63,94,0.15)', border: 'rgba(244,63,94,0.4)' },
+        face:   { label: 'Face',   color: '#6366f1', bg: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)' },
+        both:   { label: 'Both',   color: '#9333ea', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.4)' },
       };
 
       return (
@@ -2541,7 +2541,7 @@
                         className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95"
                         style={active
                           ? {background:cfg.bg, border:`1px solid ${cfg.border}`, color:cfg.color}
-                          : {background:'var(--pg-surface)', border:'1px solid var(--pg-border)', color:'rgba(255,255,255,0.4)'}}>
+                          : {background:'var(--pg-surface)', border:'1px solid var(--pg-border)', color:'var(--pg-t2)'}}>
                         {cfg.label}
                       </button>
                     );
@@ -2608,9 +2608,9 @@
       };
 
       const PROC_CATEGORY_STYLE = {
-        dental: { bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)', text: '#fb7185', accent: '#fb7185' },
-        face:   { bg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.3)', text: '#a5b4fc', accent: '#a5b4fc' },
-        both:   { bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', text: '#d8b4fe', accent: '#d8b4fe' },
+        dental: { bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)', text: '#e11d48', accent: '#e11d48' },
+        face:   { bg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.3)', text: '#6366f1', accent: '#6366f1' },
+        both:   { bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', text: '#9333ea', accent: '#9333ea' },
       };
 
       const [ac1, ac2] = getAvatarGradForTheme(patient.name);
@@ -2861,8 +2861,8 @@
                         onClick={() => onStartCamera(mode.id, photos, procedure)}
                         className="rounded-xl p-2.5 text-center active:scale-95 transition-transform relative overflow-hidden"
                         style={{
-                          background: done ? `${mc}18` : 'rgba(255,255,255,0.05)',
-                          border: `1px solid ${done ? mc + '40' : 'rgba(255,255,255,0.09)'}`,
+                          background: done ? `${mc}18` : 'var(--pg-surface-hi)',
+                          border: `1px solid ${done ? mc + '40' : 'var(--pg-border)'}`,
                         }}>
                         {done && (
                           <div className="absolute top-1 right-1 w-2 h-2 rounded-full"
@@ -2900,7 +2900,7 @@
                 className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors"
                 style={filterMode === m
                   ? {background:'linear-gradient(135deg, var(--pg-accent-1), var(--pg-accent-2))', color:'white'}
-                  : {background:'var(--pg-input)', color:'rgba(255,255,255,0.45)', border:'1px solid var(--pg-border)'}}>
+                  : {background:'var(--pg-input)', color:'var(--pg-t2)', border:'1px solid var(--pg-border)'}}>
                 {m === 'all' ? 'All Views' : CAPTURE_MODES[m]?.abbr}
               </button>
             ))}
@@ -2909,10 +2909,10 @@
               <button key={t} onClick={() => setFilterType(t)}
                 className="px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 transition-colors"
                 style={filterType === t
-                  ? {background: t === 'pre' ? 'rgba(52,211,153,0.25)' : t === 'post' ? 'rgba(251,191,36,0.25)' : 'rgba(139,92,246,0.25)',
-                     color: t === 'pre' ? '#6ee7b7' : t === 'post' ? '#fde68a' : '#ddd6fe',
-                     border: `1px solid ${t === 'pre' ? 'rgba(52,211,153,0.4)' : t === 'post' ? 'rgba(251,191,36,0.4)' : 'rgba(139,92,246,0.4)'}`}
-                  : {background:'var(--pg-input)', color:'rgba(255,255,255,0.45)', border:'1px solid var(--pg-border)'}}>
+                  ? {background: t === 'pre' ? 'rgba(52,211,153,0.2)' : t === 'post' ? 'rgba(251,191,36,0.2)' : 'rgba(139,92,246,0.2)',
+                     color: t === 'pre' ? '#059669' : t === 'post' ? '#d97706' : '#7c3aed',
+                     border: `1px solid ${t === 'pre' ? 'rgba(52,211,153,0.5)' : t === 'post' ? 'rgba(251,191,36,0.5)' : 'rgba(139,92,246,0.5)'}`}
+                  : {background:'var(--pg-input)', color:'var(--pg-t2)', border:'1px solid var(--pg-border)'}}>
                 {t === 'all' ? 'All' : t === 'pre' ? 'Pre' : 'Post'}
               </button>
             ))}
@@ -3677,7 +3677,7 @@
                   </svg>
                 ) : (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
-                    style={{background:'rgba(52,211,153,0.15)', border:'1px solid rgba(52,211,153,0.35)', color:'#6ee7b7'}}>
+                    style={{background:'rgba(52,211,153,0.15)', border:'1px solid rgba(52,211,153,0.35)', color:'#059669'}}>
                     ACTIVE
                   </span>
                 )} />
