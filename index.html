@@ -833,7 +833,7 @@
         const tid = setTimeout(() => reject(new Error('GIS token request timed out')), 15000);
         const client = google.accounts.oauth2.initTokenClient({
           client_id: DRIVE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/drive.file',
+          scope: 'https://www.googleapis.com/auth/drive',
           callback: (resp) => {
             clearTimeout(tid);
             if (resp.error) { _notifyDriveAuth(false); reject(new Error(resp.error)); }
@@ -965,6 +965,8 @@
         const token = (_driveToken && Date.now() < _driveTokenExpiry) ? _driveToken : null;
         if (!token) { _uploadRunning = false; window._syncState.drive.running = false; return; }
 
+        let doneCount = 0;
+        let lastError = null;
         for (const item of pending) {
           try {
             if (!item.dataUrl) {
@@ -984,17 +986,24 @@
             await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
             item.status = 'done';
             await DB.updateUploadItem(item);
+            doneCount++;
           } catch (err) {
             console.error('[Drive] Upload error for', item.filename, ':', err.message, err);
+            lastError = err;
             item.retries = (item.retries || 0) + 1;
             item.status = item.retries >= 5 ? 'error' : 'pending';
             await DB.updateUploadItem(item);
           }
         }
-        /* Record successful sync time */
-        const ts = Date.now();
-        window._syncState.drive.lastSync = ts;
-        await DB.setSetting('driveLastSync', ts);
+        /* Only record lastSync if at least one upload succeeded */
+        if (doneCount > 0) {
+          const ts = Date.now();
+          window._syncState.drive.lastSync = ts;
+          await DB.setSetting('driveLastSync', ts);
+        }
+        if (lastError && doneCount === 0) {
+          showToast(`Drive upload failed: ${lastError.message}`, 'error', 6000);
+        }
         const rem = await DB.getUploadQueue('pending');
         window._syncState.drive.pending = rem.length;
         const errs = await DB.getUploadQueue('error');
@@ -2621,11 +2630,174 @@
       );
     }
 
+    /* ── 9b. EditPatientModal ──────────────────────────────────────── */
+    function EditPatientModal({ patient, onSave, onClose }) {
+      const [name,  setName]  = useState(patient.name || '');
+      const [dob,   setDob]   = useState(patient.dob || '');
+      const [notes, setNotes] = useState(patient.notes || '');
+
+      const submit = (e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        onSave({ ...patient, name: name.trim(), dob, notes: notes.trim() });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end"
+          style={{background:'var(--pg-overlay)', backdropFilter:'blur(8px)'}}>
+          <div className="w-full rounded-t-3xl px-5 pt-4 pb-safe slide-up"
+            style={{background:'var(--pg-modal)', border:'1px solid var(--pg-border-hi)', borderBottom:'none'}}>
+            <div className="drag-handle" />
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-white text-[18px] font-bold">Edit Patient</h2>
+              <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center active:opacity-70"
+                style={{background:'var(--pg-surface-hi)'}}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M1 1l10 10M11 1L1 11" stroke="var(--pg-t2)" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={submit} className="space-y-3.5">
+              <div>
+                <label className="section-label block mb-1.5">Full Name *</label>
+                <input type="text" required autoFocus value={name}
+                  onChange={e => setName(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white text-[15px]"
+                  style={{background:'var(--pg-input)', border:'1px solid var(--pg-input-bd)'}}
+                />
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Date of Birth</label>
+                <input type="date" value={dob}
+                  onChange={e => setDob(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white text-[15px]"
+                  style={{background:'var(--pg-input)', border:'1px solid var(--pg-input-bd)'}}
+                />
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Clinical Notes</label>
+                <textarea rows={2} value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-[15px] resize-none"
+                  style={{background:'var(--pg-input)', border:'1px solid var(--pg-input-bd)'}}
+                />
+              </div>
+              <div className="flex gap-3 pt-1 pb-2">
+                <button type="button" onClick={onClose}
+                  className="flex-1 py-4 rounded-xl text-white/70 font-semibold text-[15px] active:scale-[0.98] transition-transform btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit"
+                  className="flex-1 py-4 rounded-xl text-white font-semibold text-[15px] active:scale-[0.98] transition-transform btn-primary">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── 10a-edit. EditProcedureModal ──────────────────────────── */
+    function EditProcedureModal({ procedure, onSave, onClose }) {
+      const [name,     setName]     = useState(procedure.name || '');
+      const [date,     setDate]     = useState(procedure.date || new Date().toISOString().split('T')[0]);
+      const [notes,    setNotes]    = useState(procedure.notes || '');
+      const [category, setCategory] = useState(procedure.category || 'dental');
+
+      const submit = (e) => {
+        e.preventDefault();
+        if (!name.trim()) return;
+        onSave({ ...procedure, name: name.trim(), date, notes: notes.trim(), category });
+      };
+
+      const CATEGORY_CONFIG = {
+        dental: { label: 'Dental', color: '#e11d48', bg: 'rgba(244,63,94,0.15)', border: 'rgba(244,63,94,0.4)' },
+        face:   { label: 'Face',   color: '#6366f1', bg: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)' },
+        both:   { label: 'Both',   color: '#9333ea', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.4)' },
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end"
+          style={{background:'var(--pg-overlay)', backdropFilter:'blur(8px)'}}>
+          <div className="w-full rounded-t-3xl px-5 pt-4 pb-safe slide-up"
+            style={{background:'var(--pg-modal)', border:'1px solid var(--pg-border-hi)', borderBottom:'none'}}>
+            <div className="drag-handle" />
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-white text-[18px] font-bold">Edit Procedure</h2>
+              <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center active:opacity-70"
+                style={{background:'var(--pg-surface-hi)'}}>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M1 1l10 10M11 1L1 11" stroke="var(--pg-t2)" strokeWidth="1.8" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={submit} className="space-y-3.5">
+              <div>
+                <label className="section-label block mb-1.5">Procedure Name *</label>
+                <input type="text" required autoFocus value={name}
+                  onChange={e => setName(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white text-[15px]"
+                  style={{background:'var(--pg-input)', border:'1px solid var(--pg-input-bd)'}}
+                />
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Date</label>
+                <input type="date" value={date}
+                  onChange={e => setDate(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3.5 text-white text-[15px]"
+                  style={{background:'var(--pg-input)', border:'1px solid var(--pg-input-bd)'}}
+                />
+              </div>
+              <div>
+                <label className="section-label block mb-2">Category</label>
+                <div className="flex gap-2">
+                  {(['dental', 'face', 'both']).map(c => {
+                    const cfg = CATEGORY_CONFIG[c];
+                    const active = category === c;
+                    return (
+                      <button key={c} type="button" onClick={() => setCategory(c)}
+                        className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95"
+                        style={active
+                          ? {background:cfg.bg, border:`1px solid ${cfg.border}`, color:cfg.color}
+                          : {background:'var(--pg-surface)', border:'1px solid var(--pg-border)', color:'var(--pg-t2)'}}>
+                        {cfg.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="section-label block mb-1.5">Notes</label>
+                <textarea rows={2} value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                  className="field-input w-full rounded-xl px-4 py-3 text-white placeholder-white/25 text-[15px] resize-none"
+                  style={{background:'var(--pg-input)', border:'1px solid var(--pg-input-bd)'}}
+                />
+              </div>
+              <div className="flex gap-3 pt-1 pb-2">
+                <button type="button" onClick={onClose}
+                  className="flex-1 py-4 rounded-xl text-white/70 font-semibold text-[15px] active:scale-[0.98] transition-transform btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit"
+                  className="flex-1 py-4 rounded-xl text-white font-semibold text-[15px] active:scale-[0.98] transition-transform btn-primary">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
     /* ── 10b. PatientDetailView (now shows procedures list) ──────── */
-    function PatientDetailView({ patient, onBack, onOpenProcedure, onAddProcedure }) {
+    function PatientDetailView({ patient, onBack, onOpenProcedure, onEditPatient, onDeletePatient }) {
       const [procedures, setProcedures] = useState([]);
       const [photoCounts, setPhotoCounts] = useState({});
       const [showAddProc, setShowAddProc] = useState(false);
+      const [showEditPatient, setShowEditPatient] = useState(false);
+      const [editingProc, setEditingProc] = useState(null);
 
       const load = useCallback(async () => {
         const procs = await DB.getProceduresByPatient(patient.id);
@@ -2655,47 +2827,66 @@
         load();
       };
 
+      const handleEditProcedure = async (updated) => {
+        await DB.saveProcedure(updated);
+        enqueueFirebaseSync('sync_procedure', updated).catch(e => { console.error('[Sync] procedure sync failed:', e); showToast('Procedure sync failed — will retry', 'warn'); });
+        setEditingProc(null);
+        load();
+      };
+
       const PROC_CATEGORY_STYLE = {
         dental: { bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)', text: '#e11d48', accent: '#e11d48' },
         face:   { bg: 'rgba(99,102,241,0.12)', border: 'rgba(99,102,241,0.3)', text: '#6366f1', accent: '#6366f1' },
         both:   { bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', text: '#9333ea', accent: '#9333ea' },
       };
 
-      const [ac1, ac2] = getAvatarGradForTheme(patient.name);
-
       return (
         <div className="flex flex-col h-full" style={{background:'var(--pg-bg)'}}>
 
           {/* Header */}
-          <div className="px-5 pt-safe pb-5"
+          <div className="px-5 pt-safe pb-4"
             style={{background:'var(--pg-header)', borderBottom:'1px solid var(--pg-footer-bd)'}}>
-            <button onClick={onBack}
-              className="flex items-center gap-1.5 text-indigo-400 text-sm mb-4 active:opacity-70">
-              <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
-                <path d="M6 1L2 6l4 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              All Patients
-            </button>
-
-            <div className="flex items-center gap-4">
-              {/* Large avatar */}
-              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-xl flex-shrink-0"
-                style={{background:`linear-gradient(135deg, ${ac1}, ${ac2})`, boxShadow:`0 4px 20px ${ac1}55`}}>
-                {patient.name.charAt(0).toUpperCase()}
+            <div className="flex items-center justify-between mb-3">
+              <button onClick={onBack}
+                className="flex items-center gap-1.5 text-indigo-400 text-sm active:opacity-70">
+                <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
+                  <path d="M6 1L2 6l4 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                All Patients
+              </button>
+              <div className="flex items-center gap-2">
+                {/* Edit patient */}
+                <button onClick={() => setShowEditPatient(true)} aria-label="Edit patient"
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:opacity-70"
+                  style={{background:'var(--pg-surface-hi)', border:'1px solid var(--pg-border)'}}>
+                  <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+                    <path d="M14.85 2.85a2 2 0 012.83 2.83L6.5 16.83l-4 1 1-4L14.85 2.85z" stroke="var(--pg-t2)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                {/* Delete patient */}
+                <button onClick={() => onDeletePatient(patient)} aria-label="Delete patient"
+                  className="w-9 h-9 rounded-xl flex items-center justify-center active:opacity-70"
+                  style={{background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.25)'}}>
+                  <svg width="15" height="15" viewBox="0 0 20 20" fill="none">
+                    <path d="M3 6h14M8 6V4h4v2M5 6l1 11h8l1-11" stroke="#ef4444" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <h1 className="text-white text-xl font-bold leading-tight truncate">{patient.name}</h1>
-                <p className="text-white/40 text-xs mt-0.5">{patient.id}</p>
                 {patient.dob && (
-                  <p className="text-white/28 text-xs mt-0.5">
+                  <p className="text-xs mt-0.5" style={{color:'var(--pg-t3)'}}>
                     DOB: {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
                   </p>
                 )}
               </div>
-              <div className="rounded-xl px-3 py-1.5 flex-shrink-0 text-center"
+              <div className="rounded-xl px-3 py-1.5 flex-shrink-0 text-center ml-3"
                 style={{background:'var(--pg-surface)', border:'1px solid var(--pg-border)'}}>
                 <p className="text-white font-bold text-base leading-none">{procedures.length}</p>
-                <p className="text-white/35 text-[10px] mt-0.5">visit{procedures.length !== 1 ? 's' : ''}</p>
+                <p className="text-[10px] mt-0.5" style={{color:'var(--pg-t3)'}}>visit{procedures.length !== 1 ? 's' : ''}</p>
               </div>
             </div>
           </div>
@@ -2718,37 +2909,51 @@
                 const cs = PROC_CATEGORY_STYLE[proc.category] || PROC_CATEGORY_STYLE.both;
                 const count = photoCounts[proc.id] ?? 0;
                 return (
-                  <button key={proc.id} onClick={() => onOpenProcedure(proc)}
-                    className="w-full rounded-2xl p-4 text-left active:scale-[0.98] transition-transform fade-in-up overflow-hidden relative"
+                  <div key={proc.id}
+                    className="w-full rounded-2xl fade-in-up overflow-hidden relative flex items-stretch"
                     style={{background:'var(--pg-surface)', border:'1px solid var(--pg-border)', boxShadow:'var(--pg-card-shadow)'}}>
                     {/* Left accent strip */}
-                    <div className="absolute left-0 top-3 bottom-3 w-[3px] rounded-full"
-                      style={{background:cs.accent}} />
-                    <div className="pl-3 flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-semibold text-[15px] leading-tight">{proc.name}</p>
-                        <p className="text-white/40 text-xs mt-1">
-                          {new Date(proc.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
-                        </p>
-                        {proc.notes && (
-                          <p className="text-white/25 text-xs mt-1 line-clamp-1">{proc.notes}</p>
-                        )}
+                    <div className="w-[3px] flex-shrink-0 rounded-l-2xl" style={{background:cs.accent}} />
+                    {/* Main tap area */}
+                    <button onClick={() => onOpenProcedure(proc)} className="flex-1 p-4 text-left active:opacity-70">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0 pr-2">
+                          <p className="text-white font-semibold text-[15px] leading-tight">{proc.name}</p>
+                          <p className="text-xs mt-1" style={{color:'var(--pg-t3)'}}>
+                            {new Date(proc.date + 'T00:00:00').toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                          </p>
+                          {proc.notes && (
+                            <p className="text-xs mt-1 line-clamp-1" style={{color:'var(--pg-t4)'}}>{proc.notes}</p>
+                          )}
+                        </div>
+                        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                            style={{background:cs.bg, border:`1px solid ${cs.border}`, color:cs.text}}>
+                            {proc.category === 'both' ? 'Face+Dental' : proc.category.charAt(0).toUpperCase() + proc.category.slice(1)}
+                          </span>
+                          <span className="text-xs" style={{color:'var(--pg-t4)'}}>{count} photo{count !== 1 ? 's' : ''}</span>
+                        </div>
                       </div>
-                      <div className="flex flex-col items-end gap-1.5 ml-3 flex-shrink-0">
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
-                          style={{background:cs.bg, border:`1px solid ${cs.border}`, color:cs.text}}>
-                          {proc.category === 'both' ? 'Face+Dental' : proc.category.charAt(0).toUpperCase() + proc.category.slice(1)}
-                        </span>
-                        <span className="text-white/30 text-xs">{count} photo{count !== 1 ? 's' : ''}</span>
-                      </div>
+                    </button>
+                    {/* Action buttons */}
+                    <div className="flex flex-col border-l" style={{borderColor:'var(--pg-border)'}}>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingProc(proc); }}
+                        className="flex-1 px-3 flex items-center justify-center active:opacity-60"
+                        aria-label="Edit procedure">
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                          <path d="M14.85 2.85a2 2 0 012.83 2.83L6.5 16.83l-4 1 1-4L14.85 2.85z" stroke="var(--pg-t2)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                      <div className="h-px" style={{background:'var(--pg-border)'}} />
+                      <button onClick={(e) => { e.stopPropagation(); deleteProcedure(proc.id); }}
+                        className="flex-1 px-3 flex items-center justify-center active:opacity-60"
+                        aria-label="Delete procedure">
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none">
+                          <path d="M3 6h14M8 6V4h4v2M5 6l1 11h8l1-11" stroke="#ef4444" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
                     </div>
-                    {/* Arrow */}
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                      <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
-                        <path d="M1 1l5 5-5 5" stroke="var(--pg-t4)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </div>
-                  </button>
+                  </div>
                 );
               })
             )}
@@ -2767,6 +2972,22 @@
               patientId={patient.id}
               onAdd={handleAddProcedure}
               onClose={() => setShowAddProc(false)}
+            />
+          )}
+
+          {showEditPatient && (
+            <EditPatientModal
+              patient={patient}
+              onSave={(updated) => { onEditPatient(updated); setShowEditPatient(false); }}
+              onClose={() => setShowEditPatient(false)}
+            />
+          )}
+
+          {editingProc && (
+            <EditProcedureModal
+              procedure={editingProc}
+              onSave={handleEditProcedure}
+              onClose={() => setEditingProc(null)}
             />
           )}
         </div>
@@ -3076,10 +3297,23 @@
     /* ── 11. PatientListView ───────────────────────────────────────── */
     function PatientListView({ patients, onSelect, onAdd, onSettings }) {
       const [q, setQ] = useState('');
+      const [procNamesMap, setProcNamesMap] = useState({});
       const sync = useSyncState();
       const driveAuthorized = useDriveAuth();
       const [authorizingDrive, setAuthorizingDrive] = useState(false);
       const anySyncing = sync.drive.running || sync.firebase.running;
+
+      /* Load procedure names for each patient (for search) */
+      useEffect(() => {
+        (async () => {
+          const map = {};
+          for (const p of patients) {
+            const procs = await DB.getProceduresByPatient(p.id);
+            map[p.id] = procs.map(pr => ({ name: pr.name, count: procs.length }));
+          }
+          setProcNamesMap(map);
+        })();
+      }, [patients]);
 
       const handleAuthorizeDrive = () => {
         if (!window.google?.accounts?.oauth2) return;
@@ -3112,13 +3346,13 @@
           .finally(() => setAuthorizingDrive(false));
       };
 
-      const filtered = patients.filter(p =>
-        p.name.toLowerCase().includes(q.toLowerCase()) ||
-        p.id.toLowerCase().includes(q.toLowerCase())
-      );
-
-      /* Avatar gradient palette — deterministic based on name initial */
-      const avatarGrad = getAvatarGradForTheme;
+      const filtered = patients.filter(p => {
+        const lq = q.toLowerCase();
+        if (!lq) return true;
+        if (p.name.toLowerCase().includes(lq)) return true;
+        const procs = procNamesMap[p.id] || [];
+        return procs.some(pr => pr.name.toLowerCase().includes(lq));
+      });
 
       return (
         <div className="flex flex-col h-full" style={{background:'var(--pg-bg)'}}>
@@ -3173,7 +3407,7 @@
               </svg>
               <input
                 type="search" value={q} onChange={e => setQ(e.target.value)}
-                placeholder="Search patients or chart ID…"
+                placeholder="Search patients or procedures…"
                 className="field-input w-full pl-10 pr-4 py-2.5 rounded-xl text-white placeholder-white/30 text-sm"
                 style={{background:'var(--pg-surface)', border:'1px solid var(--pg-border)'}}
               />
@@ -3217,24 +3451,26 @@
               </div>
             ) : (
               filtered.map(patient => {
-                const [c1, c2] = avatarGrad(patient.name);
+                const procs = procNamesMap[patient.id] || [];
+                const procCount = procs.length;
                 return (
                   <button key={patient.id} onClick={() => onSelect(patient)}
-                    className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3.5 text-left active:scale-[0.98] transition-transform fade-in-up"
+                    className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left active:scale-[0.98] transition-transform fade-in-up"
                     style={{background:'var(--pg-surface)', border:'1px solid var(--pg-border)', boxShadow:'var(--pg-card-shadow)'}}>
-                    {/* Avatar */}
-                    <div className="w-11 h-11 rounded-[11px] flex items-center justify-center text-white font-bold text-base flex-shrink-0"
-                      style={{background:`linear-gradient(135deg, ${c1}, ${c2})`}}>
-                      {patient.name.charAt(0).toUpperCase()}
-                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-white font-semibold text-[15px] leading-tight truncate">{patient.name}</p>
-                      <p className="text-white/38 text-xs mt-0.5">{patient.id}</p>
-                      {patient.dob && (
-                        <p className="text-white/25 text-xs mt-0.5">
-                          DOB {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
-                        </p>
-                      )}
+                      <p className="font-semibold text-[15px] leading-tight truncate" style={{color:'var(--pg-text)'}}>{patient.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        {patient.dob && (
+                          <p className="text-xs" style={{color:'var(--pg-t3)'}}>
+                            DOB {new Date(patient.dob + 'T00:00:00').toLocaleDateString()}
+                          </p>
+                        )}
+                        {procCount > 0 && (
+                          <p className="text-xs" style={{color:'var(--pg-t3)'}}>
+                            {patient.dob ? '·' : ''} {procCount} procedure{procCount !== 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     <svg width="7" height="12" viewBox="0 0 7 12" fill="none" className="flex-shrink-0">
                       <path d="M1 1l5 5-5 5" stroke="var(--pg-t4)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
@@ -4011,6 +4247,24 @@
         setShowAddPatient(false);
       };
 
+      const handleEditPatient = async (updated) => {
+        await DB.savePatient(updated);
+        setActivePatient(updated);
+        enqueueFirebaseSync('sync_patient', updated).catch(e => { console.error('[Sync] patient sync failed:', e); showToast('Patient sync failed — will retry', 'warn'); });
+        await loadPatients();
+        showToast('Patient updated', 'success', 2500);
+      };
+
+      const handleDeletePatient = async (patient) => {
+        if (!confirm(`Delete patient "${patient.name}" and all their data? This cannot be undone.`)) return;
+        await DB.deletePatient(patient.id);
+        enqueueFirebaseSync('delete_patient', { id: patient.id }).catch(e => { console.error('[Sync] patient delete sync failed:', e); showToast('Delete sync failed — will retry', 'warn'); });
+        setActivePatient(null);
+        setView('patients');
+        await loadPatients();
+        showToast('Patient deleted', 'success', 2500);
+      };
+
       /*
        * Camera launch flow:
        *   1. User taps a capture-mode button in PatientDetailView.
@@ -4222,6 +4476,8 @@
               patient={activePatient}
               onBack={() => { setView('patients'); loadPatients(); }}
               onOpenProcedure={(proc) => { setActiveProcedure(proc); setView('procedure-detail'); }}
+              onEditPatient={handleEditPatient}
+              onDeletePatient={handleDeletePatient}
             />
           )}
 
