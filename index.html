@@ -23,9 +23,6 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Google Identity Services (OAuth2 for Drive backup) -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-
   <!-- Firebase Compat SDK (no build step required) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -469,7 +466,6 @@
 
     /* Admin email — only this user can approve new accounts */
     const ADMIN_EMAIL    = 'sandeshjain91@gmail.com';
-    const DRIVE_CLIENT_ID = '388225472279-4to4f2ljaur2663pjcfbcq4o3fpb5lma.apps.googleusercontent.com';
 
     /* Firebase config (hardcoded for clinic) */
     const FIREBASE_CONFIG = {
@@ -506,29 +502,12 @@
 
     /* Hook: polls window._syncState every second */
     function useSyncState() {
-      const [state, setState] = React.useState(() => ({
-        drive:    { ...window._syncState.drive },
-        firebase: { ...window._syncState.firebase },
-      }));
+      const [state, setState] = React.useState(() => ({ firebase: { ...window._syncState.firebase } }));
       React.useEffect(() => {
-        const id = setInterval(() => {
-          setState({
-            drive:    { ...window._syncState.drive },
-            firebase: { ...window._syncState.firebase },
-          });
-        }, 800);
+        const id = setInterval(() => setState({ firebase: { ...window._syncState.firebase } }), 800);
         return () => clearInterval(id);
       }, []);
       return state;
-    }
-
-    function useDriveAuth() {
-      const [authorized, setAuthorized] = useState(window._driveAuthorized);
-      useEffect(() => {
-        _driveAuthListeners.add(setAuthorized);
-        return () => _driveAuthListeners.delete(setAuthorized);
-      }, []);
-      return authorized;
     }
 
     const THEMES_CONFIG = [
@@ -669,15 +648,9 @@
             if (!photoStore.indexNames.contains('procedureId')) {
               photoStore.createIndex('procedureId', 'procedureId');
             }
-            /* settings store (for Google Drive config) */
+            /* settings store */
             if (!db.objectStoreNames.contains('settings')) {
               db.createObjectStore('settings', { keyPath: 'key' });
-            }
-            /* upload queue store (for Google Drive sync) */
-            if (!db.objectStoreNames.contains('uploadQueue')) {
-              const uq = db.createObjectStore('uploadQueue', { keyPath: 'id', autoIncrement: true });
-              uq.createIndex('status',  'status');
-              uq.createIndex('photoId', 'photoId');
             }
           }
 
@@ -744,10 +717,6 @@
       },
       async setSetting(key, value) { const db = await openDB(); return idbPut(db, 'settings', { key, value }); },
 
-      /* ── Upload Queue (Google Drive) ── */
-      async addToUploadQueue(item) { const db = await openDB(); return idbAdd(db, 'uploadQueue', item); },
-      async getUploadQueue(status) { const db = await openDB(); return idbIndexQuery(db, 'uploadQueue', 'status', status); },
-      async updateUploadItem(item) { const db = await openDB(); return idbPut(db, 'uploadQueue', item); },
 
       /* ── Photo helpers for cross-device sync ── */
       async getPhotoById(id) {
@@ -806,216 +775,16 @@
       });
     }
 
-    /* ── 2b. Google Drive API helpers ────────────────────────────── */
-
-    const DRIVE_API  = 'https://www.googleapis.com/drive/v3/files';
-    const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
-
-    /* Cached Drive token — automatically re-requested when expired */
-    let _driveToken = null;
-    let _driveTokenExpiry = 0;
-    window._driveAuthorized = false; /* set true once we have a valid token */
-
-    /* Listeners for Drive auth state changes (e.g. to update banner) */
-    const _driveAuthListeners = new Set();
-    function _notifyDriveAuth(authorized) {
-      window._driveAuthorized = authorized;
-      _driveAuthListeners.forEach(fn => fn(authorized));
-      if (authorized) DB.setSetting('driveWasAuthorized', true).catch(() => {});
-    }
-
-    /* prompt: '' = silent (no popup). prompt: 'consent' = explicit popup (needs user gesture). */
-    async function getDriveToken(forceRefresh = false, prompt = '') {
-      if (!forceRefresh && _driveToken && Date.now() < _driveTokenExpiry) return _driveToken;
-      if (!window.google?.accounts?.oauth2) throw new Error('GIS not loaded');
-      return new Promise((resolve, reject) => {
-        /* Add 15s timeout so we never hang indefinitely */
-        const tid = setTimeout(() => reject(new Error('GIS token request timed out')), 15000);
-        const client = google.accounts.oauth2.initTokenClient({
-          client_id: DRIVE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/drive',
-          callback: (resp) => {
-            clearTimeout(tid);
-            if (resp.error) { _notifyDriveAuth(false); reject(new Error(resp.error)); }
-            else {
-              _driveToken = resp.access_token;
-              _driveTokenExpiry = Date.now() + ((resp.expires_in || 3600) - 60) * 1000;
-              _notifyDriveAuth(true);
-              resolve(resp.access_token);
-            }
-          },
-        });
-        client.requestAccessToken({ prompt });
-      });
-    }
-
-    /* Called from UI (user gesture) to explicitly authorize Drive */
-    function authorizeDrive() {
-      return getDriveToken(true, 'consent');
-    }
-
-    /* iOS Safari does not support fetch('data:...') — use atob instead */
-    function dataUrlToBlob(dataUrl) {
-      const [header, b64] = dataUrl.split(',');
-      const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return new Blob([bytes], { type: mime });
-    }
-
-    /* Called on app startup — silently re-auth if user previously authorized.
-       Waits up to 8s for GIS script to load, then attempts silent token. */
-    async function tryDriveSilentAuth() {
-      const wasAuthorized = await DB.getSetting('driveWasAuthorized');
-      if (!wasAuthorized) return; /* never authorized — show banner */
-      /* Wait for GIS to load */
-      for (let i = 0; i < 16; i++) {
-        if (window.google?.accounts?.oauth2) break;
-        await new Promise(r => setTimeout(r, 500));
-      }
-      if (!window.google?.accounts?.oauth2) return;
-      try {
-        await getDriveToken(false, ''); /* silent — no popup */
-        processUploadQueue();           /* resume any pending uploads */
-      } catch (_) {
-        /* Silent auth failed (session expired) — banner will show */
-        console.log('[Drive] Silent re-auth failed — user will need to re-authorize');
-      }
-    }
-
-    const DriveAPI = {
-      async findOrCreateFolder(name, parentId, token) {
-        const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
-        const searchRes = await fetch(`${DRIVE_API}?q=${encodeURIComponent(q)}&fields=files(id,name)`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!searchRes.ok) throw new Error(`Drive search ${searchRes.status}: ${await searchRes.text()}`);
-        const data = await searchRes.json();
-        if (data.files?.length > 0) return data.files[0].id;
-
-        const createRes = await fetch(DRIVE_API, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
-        });
-        if (!createRes.ok) throw new Error(`Drive create folder ${createRes.status}: ${await createRes.text()}`);
-        const folder = await createRes.json();
-        return folder.id;
-      },
-
-      async uploadPhoto(blob, filename, folderId, token) {
-        const metadata = JSON.stringify({ name: filename, parents: [folderId] });
-        const form = new FormData();
-        form.append('metadata', new Blob([metadata], { type: 'application/json' }));
-        form.append('file', blob, filename);
-
-        const res = await fetch(`${DRIVE_UPLOAD}?uploadType=multipart&fields=id`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: form,
-        });
-        if (!res.ok) throw new Error(`Drive upload ${res.status}: ${await res.text()}`);
-        const result = await res.json();
-        return result.id;
-      },
-
-      async ensureFolderHierarchy(patientName, procedureName, token) {
-        const rootId    = await this.findOrCreateFolder('PhotoGuide', 'root', token);
-        const patientId = await this.findOrCreateFolder(patientName, rootId, token);
-        const procId    = await this.findOrCreateFolder(procedureName, patientId, token);
-        return procId;
-      },
-    };
-
-    /* ── 2c. Upload Queue Processor ──────────────────────────────── */
-
     /* ── Global sync state (polled by UI components) ── */
     window._syncState = window._syncState || {
-      drive:    { running: false, lastSync: null, pending: 0, errors: 0 },
       firebase: { running: false, lastSync: null, pending: 0, errors: 0 },
     };
-    /* Load persisted timestamps on startup */
     (async () => {
-      const dl = await DB.getSetting('driveLastSync');
       const fl = await DB.getSetting('fbLastSync');
-      if (dl) window._syncState.drive.lastSync    = dl;
       if (fl) window._syncState.firebase.lastSync = fl;
     })();
 
-    let _uploadRunning = false;
-
-    async function processUploadQueue() {
-      if (_uploadRunning) return;
-      _uploadRunning = true;
-      window._syncState.drive.running = true;
-      try {
-        /* Recover items stuck in 'uploading' and reset 'error' items for retry */
-        const stuck = await DB.getUploadQueue('uploading');
-        for (const s of stuck) { s.status = 'pending'; await DB.updateUploadItem(s); }
-        const errored = await DB.getUploadQueue('error');
-        for (const e of errored) { e.status = 'pending'; e.retries = 0; await DB.updateUploadItem(e); }
-
-        const pending = await DB.getUploadQueue('pending');
-        window._syncState.drive.pending = pending.length;
-        if (pending.length === 0) { _uploadRunning = false; window._syncState.drive.running = false; return; }
-
-        /* Use cached token only — never call requestAccessToken in background (can hang).
-           User must re-authorize via banner/settings if token is expired. */
-        const token = (_driveToken && Date.now() < _driveTokenExpiry) ? _driveToken : null;
-        if (!token) { _uploadRunning = false; window._syncState.drive.running = false; return; }
-
-        let doneCount = 0;
-        let lastError = null;
-        for (const item of pending) {
-          try {
-            if (!item.dataUrl) {
-              console.warn('[Drive] Skipping item with no dataUrl:', item.id);
-              item.status = 'error';
-              await DB.updateUploadItem(item);
-              continue;
-            }
-            item.status = 'uploading';
-            await DB.updateUploadItem(item);
-
-            const folderId = await DriveAPI.ensureFolderHierarchy(
-              item.patientName, item.procedureName || 'General', token
-            );
-            /* Use atob-based converter — fetch('data:...') fails on iOS Safari */
-            const blob = dataUrlToBlob(item.dataUrl);
-            await DriveAPI.uploadPhoto(blob, item.filename, folderId, token);
-            item.status = 'done';
-            await DB.updateUploadItem(item);
-            doneCount++;
-          } catch (err) {
-            console.error('[Drive] Upload error for', item.filename, ':', err.message, err);
-            lastError = err;
-            item.retries = (item.retries || 0) + 1;
-            item.status = item.retries >= 5 ? 'error' : 'pending';
-            await DB.updateUploadItem(item);
-          }
-        }
-        /* Only record lastSync if at least one upload succeeded */
-        if (doneCount > 0) {
-          const ts = Date.now();
-          window._syncState.drive.lastSync = ts;
-          await DB.setSetting('driveLastSync', ts);
-        }
-        if (lastError && doneCount === 0) {
-          showToast(`Drive upload failed: ${lastError.message}`, 'error', 6000);
-        }
-        const rem = await DB.getUploadQueue('pending');
-        window._syncState.drive.pending = rem.length;
-        const errs = await DB.getUploadQueue('error');
-        window._syncState.drive.errors = errs.length;
-      } catch (err) {
-        console.error('Upload queue error:', err);
-      }
-      _uploadRunning = false;
-      window._syncState.drive.running = false;
-    }
-
-    /* ── 2d. Firebase Initialization ─────────────────────────────── */
+    /* ── 2b. Firebase Initialization ─────────────────────────────── */
 
     let _firebaseApp = null;
     let _firestore   = null;
@@ -1289,19 +1058,8 @@
 
     /* Retry on reconnect */
     window.addEventListener('online', () => {
-      processUploadQueue();
       processFirebaseSyncQueue();
     });
-
-    /* Listen for service worker sync messages */
-    if (navigator.serviceWorker) {
-      navigator.serviceWorker.addEventListener('message', (e) => {
-        if (e.data?.type === 'SYNC_UPLOADS') {
-          processUploadQueue();
-          processFirebaseSyncQueue();
-        }
-      });
-    }
 
     /* ── 3. FrontalGuide ────────────────────────────────────────────── */
     function FrontalGuide({ ready = false }) {
@@ -3299,9 +3057,7 @@
       const [q, setQ] = useState('');
       const [procNamesMap, setProcNamesMap] = useState({});
       const sync = useSyncState();
-      const driveAuthorized = useDriveAuth();
-      const [authorizingDrive, setAuthorizingDrive] = useState(false);
-      const anySyncing = sync.drive.running || sync.firebase.running;
+      const anySyncing = sync.firebase.running;
 
       /* Load procedure names for each patient (for search) */
       useEffect(() => {
@@ -3314,37 +3070,6 @@
           setProcNamesMap(map);
         })();
       }, [patients]);
-
-      const handleAuthorizeDrive = () => {
-        if (!window.google?.accounts?.oauth2) return;
-        setAuthorizingDrive(true);
-        authorizeDrive()
-          .then(async () => {
-            /* Enqueue all existing photos that aren't already queued */
-            const existingPending   = await DB.getUploadQueue('pending');
-            const existingUploading = await DB.getUploadQueue('uploading');
-            const alreadyQueued = new Set([...existingPending, ...existingUploading].map(i => i.photoId).filter(Boolean));
-            for (const pat of patients) {
-              const procs = await DB.getProceduresByPatient(pat.id);
-              for (const proc of procs) {
-                const photos = await DB.getPhotosByProcedure(proc.id);
-                for (const ph of photos) {
-                  if (!ph.dataUrl || alreadyQueued.has(ph.id)) continue;
-                  await DB.addToUploadQueue({
-                    photoId: ph.id, patientName: pat.name,
-                    procedureName: proc.name || proc.category || 'Visit',
-                    filename: ph.filename || `${ph.captureMode || 'photo'}_${ph.id}.jpg`,
-                    dataUrl: ph.dataUrl, status: 'pending', retries: 0, createdAt: Date.now(),
-                  });
-                }
-              }
-            }
-            processUploadQueue();
-            showToast('Google Drive authorized — uploading photos', 'success', 3000);
-          })
-          .catch(e => { console.error('[Drive] Authorization failed:', e); showToast('Drive authorization failed', 'error'); })
-          .finally(() => setAuthorizingDrive(false));
-      };
 
       const filtered = patients.filter(p => {
         const lq = q.toLowerCase();
@@ -3370,7 +3095,7 @@
                         <path d="M11 6A5 5 0 1 1 6 1" stroke="#6366f1" strokeWidth="1.8" strokeLinecap="round"/>
                       </svg>
                       <span className="text-[11px] sync-pulse" style={{color:'#6366f1'}}>
-                        Syncing{sync.drive.running && sync.firebase.running ? '' : sync.drive.running ? ' Drive' : ' Firebase'}…
+                        Syncing…
                       </span>
                     </>
                   ) : (
@@ -3413,24 +3138,6 @@
               />
             </div>
           </div>
-
-          {/* Drive auth banner — shown once until user authorizes */}
-          {!driveAuthorized && (
-            <button onClick={handleAuthorizeDrive} disabled={authorizingDrive}
-              className="w-full flex items-center gap-3 px-4 py-2.5 active:opacity-70 transition-opacity"
-              style={{background:'rgba(99,102,241,0.08)', borderBottom:'1px solid rgba(99,102,241,0.18)'}}>
-              <span style={{fontSize:18}}>☁️</span>
-              <div className="flex-1 text-left">
-                <p className="text-[13px] font-semibold" style={{color:'#6366f1'}}>
-                  {authorizingDrive ? 'Authorizing…' : 'Authorize Google Drive Backup'}
-                </p>
-                <p className="text-[11px]" style={{color:'var(--pg-t3)'}}>Tap to enable automatic photo backup</p>
-              </div>
-              <svg width="7" height="12" viewBox="0 0 7 12" fill="none">
-                <path d="M1 1l5 5-5 5" stroke="#6366f1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          )}
 
           {/* Patient list */}
           <div className="flex-1 overflow-y-auto no-scroll px-4 py-3 space-y-2">
@@ -3483,7 +3190,7 @@
 
           {/* Footer */}
           <div className="px-5 pb-safe pt-2 text-center" style={{borderTop:'1px solid var(--pg-footer-bd)'}}>
-            <p className="text-white/18 text-[10px]">Encrypted · Synced to Firebase · Multi-device</p>
+            <p className="text-white/18 text-[10px]">Encrypted · Firebase Cloud Sync · Multi-device</p>
           </div>
         </div>
       );
@@ -3539,11 +3246,7 @@
 
     /* ── 13. SettingsView ─────────────────────────────────────────── */
     function SettingsView({ onBack }) {
-      const driveAuthorized = useDriveAuth();
-      const [pendingCount, setPendingCount] = useState(0);
-      const [errorCount,   setErrorCount]   = useState(0);
       const [storageUsed,  setStorageUsed]  = useState(null);
-      const [reauthorizing, setReauthorizing] = useState(false);
 
       /* Theme */
       const [activeTheme, setActiveTheme] = useState(
@@ -3553,7 +3256,6 @@
       /* Firebase sync status */
       const [fbSyncPending,  setFbSyncPending]  = useState(0);
       const [fbSyncErrors,   setFbSyncErrors]   = useState(0);
-      const [fbInitialSync,  setFbInitialSync]  = useState(false);
 
       /* Admin user management */
       const [currentUserEmail, setCurrentUserEmail] = useState('');
@@ -3584,11 +3286,6 @@
           setCurrentUserEmail(email);
           const admin = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
           setIsAdmin(admin);
-
-          const pq = await DB.getUploadQueue('pending');
-          const eq = await DB.getUploadQueue('error');
-          setPendingCount(pq.length);
-          setErrorCount(eq.length);
 
           const fbp = await DB.getFirebaseQueue('pending');
           const fbe = await DB.getFirebaseQueue('error');
@@ -3627,51 +3324,10 @@
         await loadUsers();
       };
 
-      const handleReauthorize = () => {
-        if (!window.google?.accounts?.oauth2) { showToast('Google services not loaded yet', 'warn'); return; }
-        setReauthorizing(true);
-        authorizeDrive()
-          .then(() => { processUploadQueue(); showToast('Drive authorized', 'success', 2500); })
-          .catch(e => { console.error('[Drive] Reauth failed:', e); showToast('Authorization failed', 'error'); })
-          .finally(() => setReauthorizing(false));
-      };
-
-      const handleUploadNow = () => {
-        processUploadQueue();
-        showToast('Upload started', 'info', 2000);
-      };
-
       /* ── Firebase handlers ── */
       const handleFirebaseSyncNow = () => {
         processFirebaseSyncQueue();
-        alert('Firebase sync started.');
-      };
-
-      const handleInitialSync = async () => {
-        if (!confirm('This will upload all local patients, procedures, and photos to Firebase. Continue?')) return;
-        setFbInitialSync(true);
-        try {
-          const patients   = await DB.getPatients();
-          const allProcs   = [];
-          const allPhotos  = [];
-          for (const p of patients) {
-            await enqueueFirebaseSync('sync_patient', p);
-            const procs = await DB.getProceduresByPatient(p.id);
-            for (const pr of procs) {
-              await enqueueFirebaseSync('sync_procedure', pr);
-              const photos = await DB.getPhotosByProcedure(pr.id);
-              for (const ph of photos) {
-                await enqueueFirebaseSync('sync_photo', ph, ph.dataUrl);
-              }
-            }
-          }
-          alert(`Queued ${patients.length} patients for sync. Syncing in background…`);
-          const fbp = await DB.getFirebaseQueue('pending');
-          setFbSyncPending(fbp.length);
-        } catch (err) {
-          alert('Initial sync error: ' + err.message);
-        }
-        setFbInitialSync(false);
+        showToast('Firebase sync started', 'info', 2000);
       };
 
       const handleLogout = async () => {
@@ -3712,7 +3368,7 @@
         </div>
       );
 
-      /* Sync status row shown inside Drive / Firebase cards */
+      /* Sync status row */
       const SyncRow = ({ state, label }) => {
         const ts = formatSyncTime(state.lastSync);
         return (
@@ -3929,52 +3585,13 @@
               <p className="text-white/45 text-sm leading-relaxed">
                 Patient data, procedures, and photos sync automatically across all devices.
               </p>
-              <div className="flex gap-2">
-                {fbSyncPending > 0 && (
-                  <button onClick={handleFirebaseSyncNow}
-                    className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold active:scale-95"
-                    style={{background:'rgba(249,115,22,0.8)'}}>
-                    Sync Now
-                  </button>
-                )}
-                <button onClick={handleInitialSync} disabled={fbInitialSync}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-medium active:scale-95 disabled:opacity-50"
-                  style={{background:'var(--pg-surface-hi)', border:'1px solid var(--pg-border)', color:'var(--pg-t2)'}}>
-                  {fbInitialSync ? 'Uploading…' : '↑ Upload All'}
+              {fbSyncPending > 0 && (
+                <button onClick={handleFirebaseSyncNow}
+                  className="w-full py-2.5 rounded-xl text-white text-sm font-semibold active:scale-95"
+                  style={{background:'rgba(249,115,22,0.8)'}}>
+                  Sync Now
                 </button>
-              </div>
-            </SCard>
-
-            {/* Google Drive Backup */}
-            <SCard>
-              <SSection icon="☁️" title="Google Drive Backup"
-                badge={sync.drive.running && (
-                  <svg className="sync-spin w-4 h-4" viewBox="0 0 16 16" fill="none">
-                    <path d="M14 8A6 6 0 1 1 8 2" stroke="#6366f1" strokeWidth="2" strokeLinecap="round"/>
-                  </svg>
-                )}
-              />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl px-3.5 py-2.5"
-                  style={driveAuthorized
-                    ? {background:'rgba(52,211,153,0.07)', border:'1px solid rgba(52,211,153,0.2)'}
-                    : {background:'rgba(99,102,241,0.07)', border:'1px solid rgba(99,102,241,0.2)'}}>
-                  <div>
-                    <p className="text-sm font-semibold" style={{color: driveAuthorized ? '#10b981' : '#6366f1'}}>
-                      {driveAuthorized ? 'Authorized' : 'Not yet authorized'}
-                    </p>
-                    <p className="text-white/40 text-xs">
-                      {driveAuthorized ? 'Photos backup automatically to Google Drive' : 'Tap below to authorize backup'}
-                    </p>
-                  </div>
-                </div>
-                <SyncRow state={sync.drive} label="photos" />
-                <button onClick={handleReauthorize} disabled={reauthorizing}
-                  className="w-full py-2.5 rounded-xl text-sm font-medium active:scale-[0.98] disabled:opacity-50"
-                  style={{background:'var(--pg-surface-hi)', color:'var(--pg-t2)', border:'1px solid var(--pg-border)'}}>
-                  {reauthorizing ? 'Authorizing…' : driveAuthorized ? 'Re-authorize Drive' : 'Authorize Google Drive'}
-                </button>
-              </div>
+              )}
             </SCard>
 
             {/* Storage */}
@@ -3999,7 +3616,7 @@
               ) : (
                 <p className="text-white/38 text-sm">Storage estimate unavailable</p>
               )}
-              <p className="text-white/25 text-xs">Photos saved locally via IndexedDB · Synced to Firebase</p>
+              <p className="text-white/25 text-xs">Photos saved locally via IndexedDB and synced to Firebase</p>
             </SCard>
 
           </div>
@@ -4346,25 +3963,7 @@
           triggerDownload(blob, filename);
         }
 
-        /* 3. Queue Google Drive upload (always — uploads when authorized) */
-        try {
-          await DB.addToUploadQueue({
-            photoId:       photoId,
-            patientName:   activePatient.name,
-            procedureName: activeProcedure?.name || 'General',
-            filename,
-            dataUrl:       photoData.dataUrl,
-            status:        'pending',
-            retries:       0,
-            createdAt:     Date.now(),
-          });
-          processUploadQueue();
-          if (navigator.serviceWorker?.ready) {
-            navigator.serviceWorker.ready.then(reg => reg.sync?.register('sync-photos')).catch(e => console.error('[SW] background sync registration failed:', e));
-          }
-        } catch (e) { console.error('[Drive] queue upload failed:', e); showToast('Drive upload queue failed', 'warn'); }
-
-        /* 4. Queue Firebase sync */
+        /* 3. Queue Firebase sync */
         try {
           await enqueueFirebaseSync('sync_photo', { ...photoRecord, id: photoId }, photoData.dataUrl);
         } catch (e) { console.error('[Sync] photo sync failed:', e); showToast('Photo sync failed — will retry', 'warn'); }
@@ -4553,9 +4152,6 @@
           if (step === 'done') refreshRef.current?.();
         });
       }, [userStatus, user?.uid]);
-
-      /* Auto-resume Drive: silently re-auth if previously authorized, then upload */
-      useEffect(() => { tryDriveSilentAuth(); }, []);
 
       /* Load saved theme on mount (default: clean-bright) */
       useEffect(() => {

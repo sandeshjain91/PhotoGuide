@@ -23,7 +23,6 @@ const CDN_PATTERNS = [
   'unpkg.com/react',
   'unpkg.com/react-dom',
   'unpkg.com/@babel/standalone',
-  'accounts.google.com/gsi',
   'gstatic.com/firebasejs',
 ];
 
@@ -103,13 +102,3 @@ async function networkFirst(request) {
   }
 }
 
-// ─── Background Sync (Google Drive upload queue) ────────────────────────────
-self.addEventListener('sync', (event) => {
-  if (event.tag === 'sync-photos') {
-    event.waitUntil(
-      self.clients.matchAll().then((clients) => {
-        clients.forEach((client) => client.postMessage({ type: 'SYNC_UPLOADS' }));
-      })
-    );
-  }
-});
